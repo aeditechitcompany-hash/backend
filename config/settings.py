@@ -188,7 +188,8 @@ SIMPLE_JWT = {
     'AUTH_HEADER_TYPES': ('Bearer',),
 }
 
-CORS_ALLOW_ALL_ORIGINS = True
+
+CORS_ALLOW_ALL_ORIGINS = ["http://localhost:3000", "https://backend-6-oy22.onrender.com/"]
 
 SPECTACULAR_SETTINGS = {
     "TITLE": "Study Abroad Management API",
