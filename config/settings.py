@@ -75,6 +75,11 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 
+CSRF_TRUSTED_ORIGINS = [
+    "https://backend-7-uozu.onrender.com",
+    
+]
+
 ROOT_URLCONF = 'config.urls'
 
 TEMPLATES = [
