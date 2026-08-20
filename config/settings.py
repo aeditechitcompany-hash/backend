@@ -25,7 +25,7 @@ SECRET_KEY = 'django-insecure-t$m0i)g28&(e9549nu85@o27ud!dbn!_+co!c6i^1et-@x(%vf
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ["https://backend-6-oy22.onrender.com/", "http://localhost:3000"]
+ALLOWED_HOSTS = ["https://backend-7-uozu.onrender.com/", "http://localhost:3000"]
 
 
 # Application definition
@@ -189,7 +189,7 @@ SIMPLE_JWT = {
 }
 
 
-CORS_ALLOW_ALL_ORIGINS = ["http://localhost:3000", "https://backend-6-oy22.onrender.com/"]
+CORS_ALLOW_ALL_ORIGINS = ["http://localhost:3000", "https://backend-7-uozu.onrender.com"]
 
 SPECTACULAR_SETTINGS = {
     "TITLE": "Study Abroad Management API",
