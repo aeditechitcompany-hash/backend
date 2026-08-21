@@ -27,7 +27,11 @@ SECRET_KEY = 'django-insecure-t$m0i)g28&(e9549nu85@o27ud!dbn!_+co!c6i^1et-@x(%vf
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['*']
+ALLOWED_HOSTS = [
+    "localhost",
+    "127.0.0.1",
+    "backend-7-uozu.onrender.com",
+]
 
 
 # Application definition
@@ -76,8 +80,6 @@ MIDDLEWARE = [
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
-
-CSRF_TRUSTED_ORIGINS = ['*']
 
 ROOT_URLCONF = 'config.urls'
 
@@ -206,7 +208,11 @@ SIMPLE_JWT = {
 }
 
 
-CORS_ALLOW_ALL_ORIGINS = ['*']
+CORS_ALLOW_ALL_ORIGINS = True
+
+CSRF_TRUSTED_ORIGINS = [
+    "https://backend-7-uozu.onrender.com",
+]
 
 SPECTACULAR_SETTINGS = {
     "TITLE": "Study Abroad Management API",
