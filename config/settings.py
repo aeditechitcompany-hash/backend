@@ -108,6 +108,24 @@ WSGI_APPLICATION = 'config.wsgi.application'
 #     )
 # }
 
+if os.environ.get("DATABASE_URL"):
+    DATABASES = {
+        "default": dj_database_url.parse(
+            os.environ.get("DATABASE_URL")
+        )
+    }
+else:
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.postgresql",
+            "NAME": "backend_db",
+            "USER": "django_user",
+            "PASSWORD": "YOUR_LOCAL_PASSWORD",
+            "HOST": "127.0.0.1",
+            "PORT": "5432",
+        }
+    }
+
 REST_FRAMEWORK = {
     
     'DEFAULT_AUTHENTICATION_CLASSES': (
