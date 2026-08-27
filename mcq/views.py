@@ -27,9 +27,7 @@ from .serializers import (
 )
 
 
-# ============================================================
 # HELPERS
-# ============================================================
 
 def _is_staff_role(user):
     """
@@ -71,9 +69,7 @@ def _has_mcq_access(user):
     return student.mcq_access
 
 
-# ============================================================
 # QUESTION SET VIEWSET
-# ============================================================
 
 class QuestionSetViewSet(viewsets.ModelViewSet):
     """
@@ -107,31 +103,23 @@ class QuestionSetViewSet(viewsets.ModelViewSet):
         qs = QuestionSet.objects.all()
         user = self.request.user
 
-        # ----------------------------------------------------
         # Not authenticated
-        # ----------------------------------------------------
 
         if not user or not user.is_authenticated:
             return qs.none()
 
-        # ----------------------------------------------------
         # Admin / Counselor / Superuser
-        # ----------------------------------------------------
 
         if _is_staff_role(user):
             return qs
 
-        # ----------------------------------------------------
         # Student MCQ access check
-        # ----------------------------------------------------
 
         if not _has_mcq_access(user):
             return qs.none()
 
-        # ----------------------------------------------------
         # Student with access
         # Only active sets are visible.
-        # ----------------------------------------------------
 
         return qs.filter(is_active=True)
 
@@ -172,9 +160,7 @@ class QuestionSetViewSet(viewsets.ModelViewSet):
         )
 
 
-# ============================================================
 # QUESTION VIEWSET
-# ============================================================
 
 class QuestionViewSet(viewsets.ModelViewSet):
     """
@@ -231,9 +217,7 @@ class QuestionViewSet(viewsets.ModelViewSet):
         return qs.filter(question_set__is_active=True)
 
 
-# ============================================================
 # OPTION VIEWSET
-# ============================================================
 
 class OptionViewSet(viewsets.ModelViewSet):
     """
@@ -288,9 +272,7 @@ class OptionViewSet(viewsets.ModelViewSet):
         )
 
 
-# ============================================================
 # ATTEMPT VIEWSET
-# ============================================================
 
 class AttemptViewSet(viewsets.ModelViewSet):
     """
@@ -327,16 +309,12 @@ class AttemptViewSet(viewsets.ModelViewSet):
         qs = super().get_queryset()
         user = self.request.user
 
-        # ----------------------------------------------------
         # Admin / Counselor / Superuser
-        # ----------------------------------------------------
 
         if _is_staff_role(user):
             return qs
 
-        # ----------------------------------------------------
         # Student
-        # ----------------------------------------------------
 
         try:
             student = StudentProfile.objects.get(
@@ -345,33 +323,25 @@ class AttemptViewSet(viewsets.ModelViewSet):
         except StudentProfile.DoesNotExist:
             return qs.none()
 
-        # ----------------------------------------------------
         # MCQ access check
-        # ----------------------------------------------------
 
         if not student.mcq_access:
             return qs.none()
 
-        # ----------------------------------------------------
         # Student can only see own attempts
-        # ----------------------------------------------------
 
         return qs.filter(student=student)
 
     def perform_create(self, serializer):
         user = self.request.user
 
-        # ----------------------------------------------------
         # Admin / Counselor / Superuser
-        # ----------------------------------------------------
 
         if _is_staff_role(user):
             serializer.save()
             return
 
-        # ----------------------------------------------------
         # Student
-        # ----------------------------------------------------
 
         try:
             student_profile = StudentProfile.objects.get(
@@ -382,18 +352,14 @@ class AttemptViewSet(viewsets.ModelViewSet):
                 "Student profile does not exist."
             )
 
-        # ----------------------------------------------------
         # MCQ ACCESS CHECK
-        # ----------------------------------------------------
 
         if not student_profile.mcq_access:
             raise PermissionDenied(
                 "MCQ access has not been granted by an administrator."
             )
 
-        # ----------------------------------------------------
         # Force the attempt to belong to the logged-in student
-        # ----------------------------------------------------
 
         serializer.save(
             student=student_profile
@@ -411,9 +377,7 @@ class AttemptViewSet(viewsets.ModelViewSet):
 
         attempt = self.get_object()
 
-        # ----------------------------------------------------
         # Check MCQ access again
-        # ----------------------------------------------------
 
         if not _is_staff_role(request.user):
 
@@ -427,9 +391,7 @@ class AttemptViewSet(viewsets.ModelViewSet):
                     "MCQ access has not been granted by an administrator."
                 )
 
-        # ----------------------------------------------------
         # Attempt must still be in progress
-        # ----------------------------------------------------
 
         if attempt.status != Attempt.Status.IN_PROGRESS:
             return Response(
@@ -441,9 +403,7 @@ class AttemptViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # ----------------------------------------------------
         # Validate answer
-        # ----------------------------------------------------
 
         serializer = SubmitAnswerSerializer(
             data=request.data
@@ -459,9 +419,7 @@ class AttemptViewSet(viewsets.ModelViewSet):
             "selected_option"
         )
 
-        # ----------------------------------------------------
         # Make sure question belongs to this question set
-        # ----------------------------------------------------
 
         if question.question_set_id != attempt.question_set_id:
             return Response(
@@ -474,9 +432,7 @@ class AttemptViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # ----------------------------------------------------
         # Make sure selected option belongs to this question
-        # ----------------------------------------------------
 
         if (
             selected_option
@@ -492,9 +448,7 @@ class AttemptViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # ----------------------------------------------------
         # Save/update answer
-        # ----------------------------------------------------
 
         AttemptAnswer.objects.update_or_create(
             attempt=attempt,
@@ -520,9 +474,7 @@ class AttemptViewSet(viewsets.ModelViewSet):
 
         attempt = self.get_object()
 
-        # ----------------------------------------------------
         # Check ownership/access
-        # ----------------------------------------------------
 
         if not _is_staff_role(request.user):
 
@@ -536,9 +488,7 @@ class AttemptViewSet(viewsets.ModelViewSet):
                     "MCQ access has not been granted by an administrator."
                 )
 
-        # ----------------------------------------------------
         # Already finished
-        # ----------------------------------------------------
 
         if attempt.status != Attempt.Status.IN_PROGRESS:
             return Response(
@@ -550,9 +500,7 @@ class AttemptViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # ----------------------------------------------------
         # Finish attempt
-        # ----------------------------------------------------
 
         attempt.status = Attempt.Status.SUBMITTED
         attempt.submitted_at = timezone.now()
