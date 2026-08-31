@@ -33,7 +33,7 @@ if not SECRET_KEY:
 DEBUG = os.environ.get("DJANGO_DEBUG", "False").lower() == "true"
 
 ALLOWED_HOSTS = [
-    "*"
+    'backend-1-mltk.onrender.com'
     # host.strip()
     # for host in os.environ.get(
     #     "DJANGO_ALLOWED_HOSTS",
@@ -238,7 +238,7 @@ SIMPLE_JWT = {
 CORS_ALLOW_ALL_ORIGINS = True
 
 CSRF_TRUSTED_ORIGINS = [
-    "https://backend-7-uozu.onrender.com",
+    "https://backend-1-mltk.onrender.com",
 ]
 
 SPECTACULAR_SETTINGS = {
