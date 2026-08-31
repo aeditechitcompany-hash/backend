@@ -11,6 +11,10 @@ from .serializers import (
     OTPVerifySerializer, LoginHistorySerializer, RoleSerializer,
     FeaturePermissionSerializer, UserRoleSerializer,
 )
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 
 class RegisterView(generics.CreateAPIView):
@@ -20,51 +24,53 @@ class RegisterView(generics.CreateAPIView):
 
 
 class BaseLoginView(APIView):
-    """
-    Shared login logic. Subclasses set `allowed_roles` to restrict which
-    accounts may log in through that portal (e.g. a student can't log in
-    through the admin login screen, even with correct credentials).
-    `allowed_roles = None` means any role may use this endpoint.
-    """
     permission_classes = [permissions.AllowAny]
-    allowed_roles = None  # e.g. [User.Role.ADMIN]
+    allowed_roles = None
 
     def post(self, request):
-        serializer = LoginSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        user = serializer.validated_data["user"]
+        try:
+            serializer = LoginSerializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
+            user = serializer.validated_data["user"]
 
-        if self.allowed_roles is not None and not (
-            user.is_superuser or user.role in self.allowed_roles
-        ):
-            return Response(
-                {"detail": "This account does not have access to this login portal."},
-                status=status.HTTP_403_FORBIDDEN,
+            if self.allowed_roles is not None and not (
+                user.is_superuser or user.role in self.allowed_roles
+            ):
+                return Response(
+                    {"detail": "This account does not have access to this login portal."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+            if not user.is_active:
+                return Response(
+                    {"detail": "This account is disabled."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+            refresh = RefreshToken.for_user(user)
+
+            refresh["role"] = user.role
+            refresh["is_staff"] = user.is_staff
+            refresh["email"] = user.email
+            refresh.access_token["role"] = user.role
+            refresh.access_token["is_staff"] = user.is_staff
+            refresh.access_token["email"] = user.email
+
+            LoginHistory.objects.create(
+                user=user,
+                ip_address=request.META.get("REMOTE_ADDR"),
+                user_agent=request.META.get("HTTP_USER_AGENT", "")[:255],
             )
 
-        if not user.is_active:
-            return Response({"detail": "This account is disabled."}, status=status.HTTP_403_FORBIDDEN)
+            return Response({
+                "refresh": str(refresh),
+                "access": str(refresh.access_token),
+                "user": UserSerializer(user).data,
+            })
 
-        refresh = RefreshToken.for_user(user)
-
-        # Custom claims so the frontend can branch on role without another API call
-        refresh["role"] = user.role
-        refresh["is_staff"] = user.is_staff
-        refresh["email"] = user.email
-        refresh.access_token["role"] = user.role
-        refresh.access_token["is_staff"] = user.is_staff
-        refresh.access_token["email"] = user.email
-
-        LoginHistory.objects.create(
-            user=user,
-            ip_address=request.META.get("REMOTE_ADDR"),
-            user_agent=request.META.get("HTTP_USER_AGENT", "")[:255],
-        )
-        return Response({
-            "refresh": str(refresh),
-            "access": str(refresh.access_token),
-            "user": UserSerializer(user).data,
-        })
+        except Exception:
+            logger.exception("LOGIN ERROR")
+            raise
 
 
 class LoginView(BaseLoginView):
