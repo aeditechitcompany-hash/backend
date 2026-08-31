@@ -13,6 +13,8 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 from pathlib import Path
 import os
 import dj_database_url
+from datetime import timedelta  # noqa: E402
+
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -22,15 +24,22 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-t$m0i)g28&(e9549nu85@o27ud!dbn!_+co!c6i^1et-@x(%vf'
+SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY")
+
+if not SECRET_KEY:
+    raise ValueError("DJANGO_SECRET_KEY environment variable is not set")
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.environ.get("DJANGO_DEBUG", "False").lower() == "true"
 
 ALLOWED_HOSTS = [
-    "localhost",
-    "127.0.0.1",
-    "backend-7-uozu.onrender.com",
+    "*"
+    # host.strip()
+    # for host in os.environ.get(
+    #     "DJANGO_ALLOWED_HOSTS",
+    #     "localhost,127.0.0.1"
+    # ).split(",")
+    # if host.strip()
 ]
 
 
@@ -67,7 +76,6 @@ INSTALLED_APPS = [
     'process',
     'dashboard',
     'reports',
-    "drf_spectacular",
     "books",
     'mcq',
 ]
@@ -115,9 +123,9 @@ WSGI_APPLICATION = 'config.wsgi.application'
 
 if os.environ.get("DATABASE_URL"):
     DATABASES = {
-        "default": dj_database_url.parse(
-            os.environ.get("DATABASE_URL")
-        )
+       "default": dj_database_url.config(
+        default=os.environ.get("DATABASE_URL")
+     )
     }
 else:
     DATABASES = {
@@ -173,7 +181,7 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
-STATIC_URL = 'static/'
+STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 
 MEDIA_URL = '/media/'
@@ -218,7 +226,6 @@ REST_FRAMEWORK = {
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
 }
 
-from datetime import timedelta  # noqa: E402
 
 SIMPLE_JWT = {
     'ACCESS_TOKEN_LIFETIME': timedelta(minutes=60),
@@ -239,7 +246,7 @@ SPECTACULAR_SETTINGS = {
     "DESCRIPTION": "Backend API documentation",
     "VERSION": "1.0.0",
     "SERVE_INCLUDE_SCHEMA": False,
-    "SERVE_INCLUDE_SCHEMA": False,
+    
 
     "SECURITY": [
         {
