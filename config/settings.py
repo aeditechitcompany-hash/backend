@@ -194,15 +194,15 @@ CLOUDINARY_STORAGE = {
     "SECURE": True,
 }
 
-if all(CLOUDINARY_STORAGE.values()):
-    STORAGES = {
-        "default": {
-            "BACKEND": "cloudinary_storage.storage.MediaCloudinaryStorage",
-        },
-        "staticfiles": {
-            "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
-        },
-    }
+# if all(CLOUDINARY_STORAGE.values()):
+#     STORAGES = {
+#         "default": {
+#             "BACKEND": "cloudinary_storage.storage.MediaCloudinaryStorage",
+#         },
+#         "staticfiles": {
+#             "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+#         },
+#     }
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
@@ -246,7 +246,7 @@ SPECTACULAR_SETTINGS = {
     "DESCRIPTION": "Backend API documentation",
     "VERSION": "1.0.0",
     "SERVE_INCLUDE_SCHEMA": False,
-    
+
 
     "SECURITY": [
         {
