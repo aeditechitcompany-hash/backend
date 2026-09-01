@@ -2,8 +2,7 @@ import uuid
 from django.db import models
 from django.conf import settings
 from django.core.exceptions import ValidationError
-from cloudinary_storage.storage import VideoMediaCloudinaryStorage
-
+from cloudinary_storage.storage import RawMediaCloudinaryStorage
 
 class QuestionSet(models.Model):
 
