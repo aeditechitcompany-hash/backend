@@ -2,7 +2,10 @@ import uuid
 from django.db import models
 from django.conf import settings
 from django.core.exceptions import ValidationError
-from .storage import CloudinaryAudioStorage
+from .storage import (
+    CloudinaryAudioStorage,
+    CloudinaryMediaStorage,
+)
 class QuestionSet(models.Model):
 
     class Category(models.TextChoices):
