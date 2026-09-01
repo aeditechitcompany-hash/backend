@@ -2,7 +2,7 @@
 import uuid
 from django.db import models
 from django.conf import settings
-
+from .storage import CloudinaryPDFStorage
 
 class BookCategory(models.Model):
     name = models.CharField(max_length=100, unique=True)
@@ -38,8 +38,9 @@ class Book(models.Model):
     )
 
     pdf = models.FileField(
-        upload_to="books/pdfs/"
-    )
+    upload_to="books/pdfs/",
+    storage=CloudinaryPDFStorage(),
+)
 
     uploaded_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
