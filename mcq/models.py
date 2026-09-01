@@ -97,7 +97,7 @@ class Question(models.Model):
         upload_to="mcq/questions/audio/",
         blank=True,
         null=True,
-storage=RawMediaCloudinaryStorage(),   
+# storage=RawMediaCloudinaryStorage(),   
  )
 
     explanation = models.TextField(
