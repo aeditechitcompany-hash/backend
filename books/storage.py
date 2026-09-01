@@ -19,9 +19,6 @@ def configure_cloudinary():
 
 @deconstructible
 class CloudinaryPDFStorage(Storage):
-    """
-    Storage for PDF files uploaded to Cloudinary.
-    """
 
     def __init__(self):
         configure_cloudinary()
@@ -30,12 +27,18 @@ class CloudinaryPDFStorage(Storage):
         name = name.replace("\\", "/")
 
         folder = os.path.dirname(name)
+        filename = os.path.basename(name)
+
+        # Remove .pdf from the public ID.
+        # Image/video Cloudinary public IDs should not contain
+        # the file extension.
+        public_id = os.path.splitext(filename)[0]
 
         options = {
-            "resource_type": "raw",
+            "resource_type": "image",
             "use_filename": True,
             "unique_filename": True,
-            "format": "pdf",
+            "public_id": public_id,
         }
 
         if folder:
@@ -53,7 +56,8 @@ class CloudinaryPDFStorage(Storage):
 
         return cloudinary.utils.cloudinary_url(
             name,
-            resource_type="raw",
+            resource_type="image",
+            format="pdf",
             secure=True,
         )[0]
 
@@ -63,7 +67,7 @@ class CloudinaryPDFStorage(Storage):
 
             cloudinary.uploader.destroy(
                 name,
-                resource_type="raw",
+                resource_type="image",
                 invalidate=True,
             )
 
