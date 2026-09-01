@@ -2,8 +2,7 @@ import uuid
 from django.db import models
 from django.conf import settings
 from django.core.exceptions import ValidationError
-from cloudinary_storage.storage import RawMediaCloudinaryStorage
-
+from .storage import CloudinaryAudioStorage
 class QuestionSet(models.Model):
 
     class Category(models.TextChoices):
@@ -97,7 +96,7 @@ class Question(models.Model):
         upload_to="mcq/questions/audio/",
         blank=True,
         null=True,
-# storage=RawMediaCloudinaryStorage(),   
+        storage=CloudinaryAudioStorage(),
  )
 
     explanation = models.TextField(
@@ -149,7 +148,7 @@ class Option(models.Model):
         upload_to="mcq/options/audio/",
         blank=True,
         null=True,
-        storage=RawMediaCloudinaryStorage(),
+        storage=CloudinaryAudioStorage(),
     )
 
     is_correct = models.BooleanField(default=False)
