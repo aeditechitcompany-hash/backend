@@ -90,6 +90,7 @@ class Question(models.Model):
         upload_to="mcq/questions/images/",
         blank=True,
         null=True,
+        storage=CloudinaryMediaStorage(),
     )
 
     audio = models.FileField(
@@ -142,6 +143,7 @@ class Option(models.Model):
         upload_to="mcq/options/images/",
         blank=True,
         null=True,
+        storage=CloudinaryMediaStorage(),
     )
 
     audio = models.FileField(
