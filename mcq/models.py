@@ -97,8 +97,8 @@ class Question(models.Model):
         upload_to="mcq/questions/audio/",
         blank=True,
         null=True,
-        storage=VideoMediaCloudinaryStorage(),
-    )
+storage=RawMediaCloudinaryStorage(),   
+ )
 
     explanation = models.TextField(
         blank=True,
@@ -149,7 +149,7 @@ class Option(models.Model):
         upload_to="mcq/options/audio/",
         blank=True,
         null=True,
-        storage=VideoMediaCloudinaryStorage(),
+        storage=RawMediaCloudinaryStorage(),
     )
 
     is_correct = models.BooleanField(default=False)
