@@ -1,75 +1,77 @@
 import os
-
-import cloudinary
-import cloudinary.uploader
-import cloudinary.utils
+import uuid
 
 from django.core.files.storage import Storage
 from django.utils.deconstruct import deconstructible
-
-
-def configure_cloudinary():
-    cloudinary.config(
-        cloud_name=os.environ.get("CLOUDINARY_CLOUD_NAME"),
-        api_key=os.environ.get("CLOUDINARY_API_KEY"),
-        api_secret=os.environ.get("CLOUDINARY_API_SECRET"),
-        secure=True,
-    )
+from supabase import create_client, Client
 
 
 @deconstructible
-class CloudinaryPDFStorage(Storage):
+class SupabaseBookStorage(Storage):
+
+    bucket_name = "books"
 
     def __init__(self):
-        configure_cloudinary()
+        supabase_url = os.environ.get("SUPABASE_URL")
+        supabase_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
 
-    def _save(self, name, content):
-        name = name.replace("\\", "/")
+        if not supabase_url:
+            raise ValueError(
+                "SUPABASE_URL environment variable is not set"
+            )
 
-        folder = os.path.dirname(name)
-        filename = os.path.basename(name)
+        if not supabase_key:
+            raise ValueError(
+                "SUPABASE_SERVICE_ROLE_KEY environment variable is not set"
+            )
 
-        # Remove .pdf from the public ID.
-        # Image/video Cloudinary public IDs should not contain
-        # the file extension.
-        public_id = os.path.splitext(filename)[0]
-
-        options = {
-            "resource_type": "image",
-            "use_filename": True,
-            "unique_filename": True,
-            "public_id": public_id,
-        }
-
-        if folder:
-            options["folder"] = folder
-
-        result = cloudinary.uploader.upload(
-            content,
-            **options,
+        self.supabase: Client = create_client(
+            supabase_url,
+            supabase_key,
         )
 
-        return result["public_id"]
+    def _save(self, name, content):
+        original_name = os.path.basename(
+            name.replace("\\", "/")
+        )
+
+        # Give every uploaded PDF a unique filename.
+        unique_name = f"{uuid.uuid4()}_{original_name}"
+
+        file_data = content.read()
+
+        self.supabase.storage.from_(
+            self.bucket_name
+        ).upload(
+            path=unique_name,
+            file=file_data,
+            file_options={
+                "content-type": "application/pdf",
+                "cache-control": "3600",
+                "upsert": "false",
+            },
+        )
+
+        return unique_name
 
     def url(self, name):
-        configure_cloudinary()
+        if not name:
+            return ""
 
-        return cloudinary.utils.cloudinary_url(
-            name,
-            resource_type="image",
-            format="pdf",
-            secure=True,
-        )[0]
+        supabase_url = os.environ.get("SUPABASE_URL")
+
+        return (
+            f"{supabase_url}/storage/v1/object/public/"
+            f"{self.bucket_name}/{name}"
+        )
 
     def delete(self, name):
-        if name:
-            configure_cloudinary()
+        if not name:
+            return
 
-            cloudinary.uploader.destroy(
-                name,
-                resource_type="image",
-                invalidate=True,
-            )
+        self.supabase.storage.from_(
+            self.bucket_name
+        ).remove([name])
 
     def exists(self, name):
         return False

@@ -2,7 +2,7 @@
 import uuid
 from django.db import models
 from django.conf import settings
-from .storage import CloudinaryPDFStorage
+from .storage import SupabaseBookStorage
 
 class BookCategory(models.Model):
     name = models.CharField(max_length=100, unique=True)
@@ -39,7 +39,7 @@ class Book(models.Model):
 
     pdf = models.FileField(
     upload_to="books/pdfs/",
-    storage=CloudinaryPDFStorage(),
+    storage=SupabaseBookStorage(),
 )
 
     uploaded_by = models.ForeignKey(
