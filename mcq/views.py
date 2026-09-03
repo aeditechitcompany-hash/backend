@@ -16,6 +16,7 @@ from .models import (
     Attempt,
     AttemptAnswer,
 )
+
 from .serializers import (
     QuestionSetSerializer,
     QuestionSetDetailSerializer,
@@ -27,7 +28,9 @@ from .serializers import (
 )
 
 
+# ============================================================
 # HELPERS
+# ============================================================
 
 def _is_staff_role(user):
     """
@@ -69,7 +72,9 @@ def _has_mcq_access(user):
     return student.mcq_access
 
 
+# ============================================================
 # QUESTION SET VIEWSET
+# ============================================================
 
 class QuestionSetViewSet(viewsets.ModelViewSet):
     """
@@ -84,6 +89,7 @@ class QuestionSetViewSet(viewsets.ModelViewSet):
     queryset = QuestionSet.objects.all()
 
     def get_serializer_class(self):
+
         # Staff retrieving a question set gets answer keys.
         if self.action == "retrieve":
 
@@ -100,27 +106,24 @@ class QuestionSetViewSet(viewsets.ModelViewSet):
         return QuestionSetSerializer
 
     def get_queryset(self):
+
         qs = QuestionSet.objects.all()
         user = self.request.user
 
         # Not authenticated
-
         if not user or not user.is_authenticated:
             return qs.none()
 
         # Admin / Counselor / Superuser
-
         if _is_staff_role(user):
             return qs
 
         # Student MCQ access check
-
         if not _has_mcq_access(user):
             return qs.none()
 
         # Student with access
         # Only active sets are visible.
-
         return qs.filter(is_active=True)
 
     def get_permissions(self):
@@ -160,7 +163,9 @@ class QuestionSetViewSet(viewsets.ModelViewSet):
         )
 
 
+# ============================================================
 # QUESTION VIEWSET
+# ============================================================
 
 class QuestionViewSet(viewsets.ModelViewSet):
     """
@@ -214,10 +219,14 @@ class QuestionViewSet(viewsets.ModelViewSet):
             return qs.none()
 
         # Students can access questions belonging to active sets.
-        return qs.filter(question_set__is_active=True)
+        return qs.filter(
+            question_set__is_active=True
+        )
 
 
+# ============================================================
 # OPTION VIEWSET
+# ============================================================
 
 class OptionViewSet(viewsets.ModelViewSet):
     """
@@ -272,7 +281,9 @@ class OptionViewSet(viewsets.ModelViewSet):
         )
 
 
+# ============================================================
 # ATTEMPT VIEWSET
+# ============================================================
 
 class AttemptViewSet(viewsets.ModelViewSet):
     """
@@ -306,16 +317,15 @@ class AttemptViewSet(viewsets.ModelViewSet):
     ]
 
     def get_queryset(self):
+
         qs = super().get_queryset()
         user = self.request.user
 
         # Admin / Counselor / Superuser
-
         if _is_staff_role(user):
             return qs
 
         # Student
-
         try:
             student = StudentProfile.objects.get(
                 user=user
@@ -324,25 +334,22 @@ class AttemptViewSet(viewsets.ModelViewSet):
             return qs.none()
 
         # MCQ access check
-
         if not student.mcq_access:
             return qs.none()
 
         # Student can only see own attempts
-
         return qs.filter(student=student)
 
     def perform_create(self, serializer):
+
         user = self.request.user
 
         # Admin / Counselor / Superuser
-
         if _is_staff_role(user):
             serializer.save()
             return
 
         # Student
-
         try:
             student_profile = StudentProfile.objects.get(
                 user=user
@@ -353,17 +360,19 @@ class AttemptViewSet(viewsets.ModelViewSet):
             )
 
         # MCQ ACCESS CHECK
-
         if not student_profile.mcq_access:
             raise PermissionDenied(
                 "MCQ access has not been granted by an administrator."
             )
 
-        # Force the attempt to belong to the logged-in student
-
+        # Force the attempt to belong to logged-in student
         serializer.save(
             student=student_profile
         )
+
+    # ========================================================
+    # SUBMIT ANSWER
+    # ========================================================
 
     @action(
         detail=True,
@@ -377,11 +386,13 @@ class AttemptViewSet(viewsets.ModelViewSet):
 
         attempt = self.get_object()
 
-        # Check MCQ access again
+        # ----------------------------------------------------
+        # CHECK MCQ ACCESS
+        # ----------------------------------------------------
 
         if not _is_staff_role(request.user):
 
-            if not attempt.student.user == request.user:
+            if attempt.student.user != request.user:
                 raise PermissionDenied(
                     "You cannot access this attempt."
                 )
@@ -391,7 +402,9 @@ class AttemptViewSet(viewsets.ModelViewSet):
                     "MCQ access has not been granted by an administrator."
                 )
 
-        # Attempt must still be in progress
+        # ----------------------------------------------------
+        # CHECK ATTEMPT STATUS
+        # ----------------------------------------------------
 
         if attempt.status != Attempt.Status.IN_PROGRESS:
             return Response(
@@ -403,7 +416,9 @@ class AttemptViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Validate answer
+        # ----------------------------------------------------
+        # VALIDATE ANSWER
+        # ----------------------------------------------------
 
         serializer = SubmitAnswerSerializer(
             data=request.data
@@ -419,7 +434,9 @@ class AttemptViewSet(viewsets.ModelViewSet):
             "selected_option"
         )
 
-        # Make sure question belongs to this question set
+        # ----------------------------------------------------
+        # QUESTION MUST BELONG TO THIS QUESTION SET
+        # ----------------------------------------------------
 
         if question.question_set_id != attempt.question_set_id:
             return Response(
@@ -432,7 +449,9 @@ class AttemptViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Make sure selected option belongs to this question
+        # ----------------------------------------------------
+        # OPTION MUST BELONG TO THIS QUESTION
+        # ----------------------------------------------------
 
         if (
             selected_option
@@ -448,7 +467,9 @@ class AttemptViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Save/update answer
+        # ----------------------------------------------------
+        # SAVE / UPDATE ANSWER
+        # ----------------------------------------------------
 
         AttemptAnswer.objects.update_or_create(
             attempt=attempt,
@@ -462,179 +483,169 @@ class AttemptViewSet(viewsets.ModelViewSet):
             AttemptSerializer(attempt).data
         )
 
-@action(
-    detail=True,
-    methods=["post"],
-    url_path="finish",
-)
-def finish(self, request, pk=None):
-    """
-    Submit the attempt, calculate the final score,
-    and return question-by-question review information.
-    """
+    # ========================================================
+    # FINISH ATTEMPT
+    # ========================================================
 
-    attempt = self.get_object()
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="finish",
+    )
+    def finish(self, request, pk=None):
+        """
+        Finish the attempt, calculate the final score,
+        and return question-by-question review information.
+        """
 
-    # --------------------------------------------------
-    # CHECK OWNERSHIP / ACCESS
-    # --------------------------------------------------
+        attempt = self.get_object()
 
-    if not _is_staff_role(request.user):
+        # ----------------------------------------------------
+        # CHECK OWNERSHIP / ACCESS
+        # ----------------------------------------------------
 
-        if attempt.student.user != request.user:
-            raise PermissionDenied(
-                "You cannot finish this attempt."
+        if not _is_staff_role(request.user):
+
+            if attempt.student.user != request.user:
+                raise PermissionDenied(
+                    "You cannot finish this attempt."
+                )
+
+            if not attempt.student.mcq_access:
+                raise PermissionDenied(
+                    "MCQ access has not been granted by an administrator."
+                )
+
+        # ----------------------------------------------------
+        # CHECK IF ALREADY FINISHED
+        # ----------------------------------------------------
+
+        if attempt.status != Attempt.Status.IN_PROGRESS:
+            return Response(
+                {
+                    "detail": "This attempt is already finished."
+                },
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
-        if not attempt.student.mcq_access:
-            raise PermissionDenied(
-                "MCQ access has not been granted by an administrator."
+        # ----------------------------------------------------
+        # MARK ATTEMPT AS SUBMITTED
+        # ----------------------------------------------------
+
+        attempt.status = Attempt.Status.SUBMITTED
+        attempt.submitted_at = timezone.now()
+
+        attempt.save(
+            update_fields=[
+                "status",
+                "submitted_at",
+            ]
+        )
+
+        # ----------------------------------------------------
+        # CALCULATE SCORE
+        # ----------------------------------------------------
+
+        attempt.grade()
+
+        # ----------------------------------------------------
+        # GET ALL QUESTIONS
+        # ----------------------------------------------------
+
+        questions = (
+            Question.objects
+            .filter(
+                question_set=attempt.question_set
+            )
+            .prefetch_related("options")
+            .order_by("order", "id")
+        )
+
+        # ----------------------------------------------------
+        # GET ATTEMPT ANSWERS
+        # ----------------------------------------------------
+
+        attempt_answers = (
+            AttemptAnswer.objects
+            .filter(attempt=attempt)
+            .select_related(
+                "question",
+                "selected_option",
+            )
+        )
+
+        answer_map = {
+            answer.question_id: answer
+            for answer in attempt_answers
+        }
+
+        # ----------------------------------------------------
+        # BUILD QUESTION RESULTS
+        # ----------------------------------------------------
+
+        question_results = []
+
+        for question in questions:
+
+            # Student's answer
+            answer = answer_map.get(
+                question.id
             )
 
-    # --------------------------------------------------
-    # CHECK IF ALREADY FINISHED
-    # --------------------------------------------------
+            selected_option = (
+                answer.selected_option
+                if answer is not None
+                else None
+            )
 
-    if attempt.status != Attempt.Status.IN_PROGRESS:
+            # Actual correct option
+            correct_option = (
+                question.options
+                .filter(is_correct=True)
+                .first()
+            )
+
+            # Determine if selected answer is correct
+            is_correct = (
+                selected_option is not None
+                and correct_option is not None
+                and selected_option.id
+                == correct_option.id
+            )
+
+            question_results.append(
+                {
+                    "question_id": question.id,
+
+                    "selected_option_id": (
+                        selected_option.id
+                        if selected_option is not None
+                        else None
+                    ),
+
+                    "correct_option_id": (
+                        correct_option.id
+                        if correct_option is not None
+                        else None
+                    ),
+
+                    "is_correct": is_correct,
+                }
+            )
+
+        # ----------------------------------------------------
+        # BUILD RESPONSE
+        # ----------------------------------------------------
+
+        response_data = AttemptSerializer(
+            attempt
+        ).data
+
+        # Add question-by-question review data
+        response_data["question_results"] = (
+            question_results
+        )
+
         return Response(
-            {
-                "detail": "This attempt is already finished."
-            },
-            status=status.HTTP_400_BAD_REQUEST,
+            response_data
         )
-
-    # --------------------------------------------------
-    # MARK ATTEMPT AS SUBMITTED
-    # --------------------------------------------------
-
-    attempt.status = Attempt.Status.SUBMITTED
-    attempt.submitted_at = timezone.now()
-
-    attempt.save(
-        update_fields=[
-            "status",
-            "submitted_at",
-        ]
-    )
-
-    # --------------------------------------------------
-    # CALCULATE SCORE
-    # --------------------------------------------------
-
-    attempt.grade()
-
-    # --------------------------------------------------
-    # BUILD REVIEW DATA
-    #
-    # IMPORTANT:
-    # We loop through EVERY question in the question set,
-    # not just questions the student answered.
-    #
-    # This means:
-    # - answered correct -> selected + correct
-    # - answered wrong   -> selected + correct
-    # - unanswered       -> selected = null + correct
-    # --------------------------------------------------
-
-    questions = (
-        Question.objects
-        .filter(question_set=attempt.question_set)
-        .prefetch_related("options")
-        .order_by("order", "id")
-    )
-
-    attempt_answers = (
-        AttemptAnswer.objects
-        .filter(attempt=attempt)
-        .select_related("selected_option")
-    )
-
-    answer_map = {
-        answer.question_id: answer
-        for answer in attempt_answers
-    }
-
-    question_results = []
-
-    for question in questions:
-
-        # Find student's answer for this question
-        answer = answer_map.get(question.id)
-
-        # Find the correct option
-        correct_option = (
-            question.options
-            .filter(is_correct=True)
-            .first()
-        )
-
-        selected_option = (
-            answer.selected_option
-            if answer is not None
-            else None
-        )
-
-        is_correct = (
-            selected_option is not None
-            and correct_option is not None
-            and selected_option.id == correct_option.id
-        )
-
-        question_results.append(
-            {
-                "question_id": question.id,
-
-                "selected_option_id": (
-                    selected_option.id
-                    if selected_option is not None
-                    else None
-                ),
-
-                "correct_option_id": (
-                    correct_option.id
-                    if correct_option is not None
-                    else None
-                ),
-
-                "is_correct": is_correct,
-            }
-        )
-
-    # --------------------------------------------------
-    # GET NORMAL ATTEMPT SERIALIZER DATA
-    # --------------------------------------------------
-
-    response_data = AttemptSerializer(
-        attempt
-    ).data
-
-    # Add review information
-    response_data["question_results"] = question_results
-
-    # Also explicitly include useful result fields
-    response_data["score"] = getattr(
-        attempt,
-        "score",
-        response_data.get("score", 0),
-    )
-
-    response_data["max_score"] = response_data.get(
-        "max_score",
-        getattr(
-            attempt,
-            "max_score",
-            attempt.question_set.question_count,
-        ),
-    )
-
-    response_data["percentage"] = response_data.get(
-        "percentage",
-        0,
-    )
-
-    response_data["passed"] = response_data.get(
-        "passed",
-        False,
-    )
-
-    return Response(response_data)
