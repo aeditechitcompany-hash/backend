@@ -462,59 +462,179 @@ class AttemptViewSet(viewsets.ModelViewSet):
             AttemptSerializer(attempt).data
         )
 
-    @action(
-        detail=True,
-        methods=["post"],
-        url_path="finish",
-    )
-    def finish(self, request, pk=None):
-        """
-        Submit the attempt and calculate the final score.
-        """
+@action(
+    detail=True,
+    methods=["post"],
+    url_path="finish",
+)
+def finish(self, request, pk=None):
+    """
+    Submit the attempt, calculate the final score,
+    and return question-by-question review information.
+    """
 
-        attempt = self.get_object()
+    attempt = self.get_object()
 
-        # Check ownership/access
+    # --------------------------------------------------
+    # CHECK OWNERSHIP / ACCESS
+    # --------------------------------------------------
 
-        if not _is_staff_role(request.user):
+    if not _is_staff_role(request.user):
 
-            if attempt.student.user != request.user:
-                raise PermissionDenied(
-                    "You cannot finish this attempt."
-                )
-
-            if not attempt.student.mcq_access:
-                raise PermissionDenied(
-                    "MCQ access has not been granted by an administrator."
-                )
-
-        # Already finished
-
-        if attempt.status != Attempt.Status.IN_PROGRESS:
-            return Response(
-                {
-                    "detail": (
-                        "This attempt is already finished."
-                    )
-                },
-                status=status.HTTP_400_BAD_REQUEST,
+        if attempt.student.user != request.user:
+            raise PermissionDenied(
+                "You cannot finish this attempt."
             )
 
-        # Finish attempt
+        if not attempt.student.mcq_access:
+            raise PermissionDenied(
+                "MCQ access has not been granted by an administrator."
+            )
 
-        attempt.status = Attempt.Status.SUBMITTED
-        attempt.submitted_at = timezone.now()
+    # --------------------------------------------------
+    # CHECK IF ALREADY FINISHED
+    # --------------------------------------------------
 
-        attempt.save(
-            update_fields=[
-                "status",
-                "submitted_at",
-            ]
-        )
-
-        # Calculate score.
-        attempt.grade()
-
+    if attempt.status != Attempt.Status.IN_PROGRESS:
         return Response(
-            AttemptSerializer(attempt).data
+            {
+                "detail": "This attempt is already finished."
+            },
+            status=status.HTTP_400_BAD_REQUEST,
         )
+
+    # --------------------------------------------------
+    # MARK ATTEMPT AS SUBMITTED
+    # --------------------------------------------------
+
+    attempt.status = Attempt.Status.SUBMITTED
+    attempt.submitted_at = timezone.now()
+
+    attempt.save(
+        update_fields=[
+            "status",
+            "submitted_at",
+        ]
+    )
+
+    # --------------------------------------------------
+    # CALCULATE SCORE
+    # --------------------------------------------------
+
+    attempt.grade()
+
+    # --------------------------------------------------
+    # BUILD REVIEW DATA
+    #
+    # IMPORTANT:
+    # We loop through EVERY question in the question set,
+    # not just questions the student answered.
+    #
+    # This means:
+    # - answered correct -> selected + correct
+    # - answered wrong   -> selected + correct
+    # - unanswered       -> selected = null + correct
+    # --------------------------------------------------
+
+    questions = (
+        Question.objects
+        .filter(question_set=attempt.question_set)
+        .prefetch_related("options")
+        .order_by("order", "id")
+    )
+
+    attempt_answers = (
+        AttemptAnswer.objects
+        .filter(attempt=attempt)
+        .select_related("selected_option")
+    )
+
+    answer_map = {
+        answer.question_id: answer
+        for answer in attempt_answers
+    }
+
+    question_results = []
+
+    for question in questions:
+
+        # Find student's answer for this question
+        answer = answer_map.get(question.id)
+
+        # Find the correct option
+        correct_option = (
+            question.options
+            .filter(is_correct=True)
+            .first()
+        )
+
+        selected_option = (
+            answer.selected_option
+            if answer is not None
+            else None
+        )
+
+        is_correct = (
+            selected_option is not None
+            and correct_option is not None
+            and selected_option.id == correct_option.id
+        )
+
+        question_results.append(
+            {
+                "question_id": question.id,
+
+                "selected_option_id": (
+                    selected_option.id
+                    if selected_option is not None
+                    else None
+                ),
+
+                "correct_option_id": (
+                    correct_option.id
+                    if correct_option is not None
+                    else None
+                ),
+
+                "is_correct": is_correct,
+            }
+        )
+
+    # --------------------------------------------------
+    # GET NORMAL ATTEMPT SERIALIZER DATA
+    # --------------------------------------------------
+
+    response_data = AttemptSerializer(
+        attempt
+    ).data
+
+    # Add review information
+    response_data["question_results"] = question_results
+
+    # Also explicitly include useful result fields
+    response_data["score"] = getattr(
+        attempt,
+        "score",
+        response_data.get("score", 0),
+    )
+
+    response_data["max_score"] = response_data.get(
+        "max_score",
+        getattr(
+            attempt,
+            "max_score",
+            attempt.question_set.question_count,
+        ),
+    )
+
+    response_data["percentage"] = response_data.get(
+        "percentage",
+        0,
+    )
+
+    response_data["passed"] = response_data.get(
+        "passed",
+        False,
+    )
+
+    return Response(response_data)
