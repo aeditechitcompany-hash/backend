@@ -10,7 +10,7 @@ from .models import (
 
 
 # ============================================================
-# OPTION
+# OPTION - ADMIN
 # ============================================================
 
 class OptionSerializer(serializers.ModelSerializer):
@@ -30,12 +30,7 @@ class OptionSerializer(serializers.ModelSerializer):
 
 
 # ============================================================
-# OPTION PUBLIC
-#
-# Used by STUDENTS.
-#
-# IMPORTANT:
-# is_correct is intentionally NOT included.
+# OPTION - PUBLIC / STUDENT
 # ============================================================
 
 class OptionPublicSerializer(serializers.ModelSerializer):
@@ -53,9 +48,7 @@ class OptionPublicSerializer(serializers.ModelSerializer):
 
 
 # ============================================================
-# QUESTION
-#
-# Admin / backend serializer
+# QUESTION - ADMIN
 # ============================================================
 
 class QuestionSerializer(serializers.ModelSerializer):
@@ -84,13 +77,7 @@ class QuestionSerializer(serializers.ModelSerializer):
 
 
 # ============================================================
-# QUESTION PUBLIC
-#
-# Used by STUDENTS.
-#
-# IMPORTANT:
-# - is_correct is NOT included
-# - explanation is NOT included
+# QUESTION - PUBLIC / STUDENT
 # ============================================================
 
 class QuestionPublicSerializer(serializers.ModelSerializer):
@@ -116,9 +103,7 @@ class QuestionPublicSerializer(serializers.ModelSerializer):
 
 
 # ============================================================
-# QUESTION SET
-#
-# Basic question-set information.
+# QUESTION SET - BASIC
 # ============================================================
 
 class QuestionSetSerializer(serializers.ModelSerializer):
@@ -150,11 +135,9 @@ class QuestionSetSerializer(serializers.ModelSerializer):
 
 
 # ============================================================
-# QUESTION SET DETAIL
+# QUESTION SET - ADMIN DETAIL
 #
-# Admin / detailed view.
-#
-# Includes correct answers.
+# Includes correct answers and explanation.
 # ============================================================
 
 class QuestionSetDetailSerializer(
@@ -170,17 +153,19 @@ class QuestionSetDetailSerializer(
 
         fields = (
             QuestionSetSerializer.Meta.fields
-            + ["questions"]
+            + [
+                "questions",
+            ]
         )
 
 
 # ============================================================
-# QUESTION SET TAKE
-#
-# Student quiz view.
+# QUESTION SET - STUDENT TAKE
 #
 # IMPORTANT:
-# Student does NOT receive correct answers.
+# Students do NOT receive:
+# - is_correct
+# - explanation
 # ============================================================
 
 class QuestionSetTakeSerializer(
@@ -196,7 +181,9 @@ class QuestionSetTakeSerializer(
 
         fields = (
             QuestionSetSerializer.Meta.fields
-            + ["questions"]
+            + [
+                "questions",
+            ]
         )
 
 
@@ -288,7 +275,10 @@ class SubmitAnswerSerializer(
     def validate(self, attrs):
 
         question = attrs["question"]
-        selected_option = attrs.get("selected_option")
+
+        selected_option = attrs.get(
+            "selected_option"
+        )
 
         if selected_option is not None:
 
@@ -308,13 +298,21 @@ class SubmitAnswerSerializer(
 # LEADERBOARD
 # ============================================================
 
-class LeaderboardSerializer(serializers.Serializer):
+class LeaderboardSerializer(
+    serializers.Serializer
+):
+
     rank = serializers.IntegerField()
+
     name = serializers.CharField()
+
     email = serializers.EmailField()
+
     score = serializers.DecimalField(
         max_digits=5,
         decimal_places=2,
     )
+
     completed_quizzes = serializers.IntegerField()
+
     questions_solved = serializers.IntegerField()

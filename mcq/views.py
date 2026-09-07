@@ -1,8 +1,7 @@
 from django.db.models import Count, Max, Q
-from django.shortcuts import get_object_or_404
-
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
@@ -19,6 +18,7 @@ from .serializers import (
     QuestionSetDetailSerializer,
     QuestionSetTakeSerializer,
     QuestionSerializer,
+    QuestionPublicSerializer,
     OptionSerializer,
     OptionPublicSerializer,
     AttemptSerializer,
@@ -34,13 +34,15 @@ from .serializers import (
 
 def _is_staff_role(user):
     """
-    Staff users who are allowed to manage/view all MCQ data.
+    Staff users allowed to manage/view all MCQ data.
     """
 
     return (
         user.is_superuser
-        or getattr(user, "role", None)
-        in ["admin", "counselor"]
+        or getattr(user, "role", None) in [
+            "admin",
+            "counselor",
+        ]
     )
 
 
@@ -60,7 +62,7 @@ def _has_mcq_access(user):
     except Exception:
         return False
 
-    return student_profile.mcq_access
+    return bool(student_profile.mcq_access)
 
 
 # ============================================================================
@@ -68,39 +70,123 @@ def _has_mcq_access(user):
 # ============================================================================
 
 class QuestionSetViewSet(viewsets.ModelViewSet):
+
     queryset = QuestionSet.objects.all()
-    permission_classes = [IsAuthenticated]
+
+    permission_classes = [
+        IsAuthenticated,
+    ]
+
+    # ------------------------------------------------------------------------
+    # QUERYSET
+    # ------------------------------------------------------------------------
 
     def get_queryset(self):
+
         user = self.request.user
 
-        # --------------------------------------------------------------
+        # --------------------------------------------------------------------
         # STAFF
-        # --------------------------------------------------------------
+        # --------------------------------------------------------------------
 
         if _is_staff_role(user):
-            return QuestionSet.objects.all().order_by(
-                "-created_at"
+
+            return (
+                QuestionSet.objects
+                .prefetch_related(
+                    "questions__options",
+                )
+                .all()
+                .order_by("-created_at")
             )
 
-        # --------------------------------------------------------------
+        # --------------------------------------------------------------------
         # STUDENT
-        # --------------------------------------------------------------
+        # --------------------------------------------------------------------
 
         if not _has_mcq_access(user):
             return QuestionSet.objects.none()
 
-        return QuestionSet.objects.filter(
-            is_active=True
-        ).order_by(
-            "-created_at"
+        return (
+            QuestionSet.objects
+            .filter(
+                is_active=True,
+            )
+            .prefetch_related(
+                "questions__options",
+            )
+            .order_by("-created_at")
         )
 
+    # ------------------------------------------------------------------------
+    # SERIALIZER
+    # ------------------------------------------------------------------------
+
     def get_serializer_class(self):
+
+        user = self.request.user
+
+        # Student requesting a specific quiz.
+        #
+        # This is important:
+        #
+        # /question-sets/1/
+        #
+        # must use QuestionSetTakeSerializer for students.
+        #
+
         if self.action == "retrieve":
-            return QuestionSetDetailSerializer
+
+            if _is_staff_role(user):
+                return QuestionSetDetailSerializer
+
+            return QuestionSetTakeSerializer
 
         return QuestionSetSerializer
+
+    # ------------------------------------------------------------------------
+    # CREATE QUESTION SET
+    # ------------------------------------------------------------------------
+
+    def perform_create(self, serializer):
+
+        if not _is_staff_role(self.request.user):
+
+            raise PermissionDenied(
+                "Only staff users can create question sets."
+            )
+
+        serializer.save(
+            created_by=self.request.user,
+        )
+
+    # ------------------------------------------------------------------------
+    # UPDATE QUESTION SET
+    # ------------------------------------------------------------------------
+
+    def perform_update(self, serializer):
+
+        if not _is_staff_role(self.request.user):
+
+            raise PermissionDenied(
+                "Only staff users can update question sets."
+            )
+
+        serializer.save()
+
+    # ------------------------------------------------------------------------
+    # DELETE QUESTION SET
+    # ------------------------------------------------------------------------
+
+    def perform_destroy(self, instance):
+
+        if not _is_staff_role(self.request.user):
+
+            raise PermissionDenied(
+                "Only staff users can delete question sets."
+            )
+
+        instance.delete()
 
 
 # ============================================================================
@@ -108,42 +194,120 @@ class QuestionSetViewSet(viewsets.ModelViewSet):
 # ============================================================================
 
 class QuestionViewSet(viewsets.ModelViewSet):
+
     queryset = Question.objects.all()
-    permission_classes = [IsAuthenticated]
+
+    permission_classes = [
+        IsAuthenticated,
+    ]
+
+    # ------------------------------------------------------------------------
+    # QUERYSET
+    # ------------------------------------------------------------------------
 
     def get_queryset(self):
+
         user = self.request.user
 
-        # --------------------------------------------------------------
+        # --------------------------------------------------------------------
         # STAFF
-        # --------------------------------------------------------------
+        # --------------------------------------------------------------------
 
         if _is_staff_role(user):
-            return Question.objects.all().order_by(
+
+            return (
+                Question.objects
+                .select_related(
+                    "question_set",
+                )
+                .prefetch_related(
+                    "options",
+                )
+                .all()
+                .order_by(
+                    "question_set",
+                    "order",
+                )
+            )
+
+        # --------------------------------------------------------------------
+        # STUDENT
+        # --------------------------------------------------------------------
+
+        if not _has_mcq_access(user):
+
+            return Question.objects.none()
+
+        return (
+            Question.objects
+            .select_related(
+                "question_set",
+            )
+            .prefetch_related(
+                "options",
+            )
+            .filter(
+                question_set__is_active=True,
+            )
+            .order_by(
                 "question_set",
                 "order",
             )
-
-        # --------------------------------------------------------------
-        # STUDENT
-        # --------------------------------------------------------------
-
-        if not _has_mcq_access(user):
-            return Question.objects.none()
-
-        return Question.objects.filter(
-            question_set__is_active=True
-        ).order_by(
-            "question_set",
-            "order",
         )
 
+    # ------------------------------------------------------------------------
+    # SERIALIZER
+    # ------------------------------------------------------------------------
+
     def get_serializer_class(self):
-        # Students should never receive correct answer information.
+
         if _is_staff_role(self.request.user):
+
             return QuestionSerializer
 
-        return QuestionSerializer
+        return QuestionPublicSerializer
+
+    # ------------------------------------------------------------------------
+    # CREATE
+    # ------------------------------------------------------------------------
+
+    def perform_create(self, serializer):
+
+        if not _is_staff_role(self.request.user):
+
+            raise PermissionDenied(
+                "Only staff users can create questions."
+            )
+
+        serializer.save()
+
+    # ------------------------------------------------------------------------
+    # UPDATE
+    # ------------------------------------------------------------------------
+
+    def perform_update(self, serializer):
+
+        if not _is_staff_role(self.request.user):
+
+            raise PermissionDenied(
+                "Only staff users can update questions."
+            )
+
+        serializer.save()
+
+    # ------------------------------------------------------------------------
+    # DELETE
+    # ------------------------------------------------------------------------
+
+    def perform_destroy(self, instance):
+
+        if not _is_staff_role(self.request.user):
+
+            raise PermissionDenied(
+                "Only staff users can delete questions."
+            )
+
+        instance.delete()
 
 
 # ============================================================================
@@ -151,41 +315,116 @@ class QuestionViewSet(viewsets.ModelViewSet):
 # ============================================================================
 
 class OptionViewSet(viewsets.ModelViewSet):
+
     queryset = Option.objects.all()
-    permission_classes = [IsAuthenticated]
+
+    permission_classes = [
+        IsAuthenticated,
+    ]
+
+    # ------------------------------------------------------------------------
+    # QUERYSET
+    # ------------------------------------------------------------------------
 
     def get_queryset(self):
+
         user = self.request.user
 
-        # --------------------------------------------------------------
+        # --------------------------------------------------------------------
         # STAFF
-        # --------------------------------------------------------------
+        # --------------------------------------------------------------------
 
         if _is_staff_role(user):
-            return Option.objects.all().order_by(
+
+            return (
+                Option.objects
+                .select_related(
+                    "question",
+                    "question__question_set",
+                )
+                .all()
+                .order_by(
+                    "question",
+                    "order",
+                )
+            )
+
+        # --------------------------------------------------------------------
+        # STUDENT
+        # --------------------------------------------------------------------
+
+        if not _has_mcq_access(user):
+
+            return Option.objects.none()
+
+        return (
+            Option.objects
+            .select_related(
+                "question",
+                "question__question_set",
+            )
+            .filter(
+                question__question_set__is_active=True,
+            )
+            .order_by(
                 "question",
                 "order",
             )
-
-        # --------------------------------------------------------------
-        # STUDENT
-        # --------------------------------------------------------------
-
-        if not _has_mcq_access(user):
-            return Option.objects.none()
-
-        return Option.objects.filter(
-            question__question_set__is_active=True
-        ).order_by(
-            "question",
-            "order",
         )
 
+    # ------------------------------------------------------------------------
+    # SERIALIZER
+    # ------------------------------------------------------------------------
+
     def get_serializer_class(self):
+
         if _is_staff_role(self.request.user):
+
             return OptionSerializer
 
         return OptionPublicSerializer
+
+    # ------------------------------------------------------------------------
+    # CREATE
+    # ------------------------------------------------------------------------
+
+    def perform_create(self, serializer):
+
+        if not _is_staff_role(self.request.user):
+
+            raise PermissionDenied(
+                "Only staff users can create options."
+            )
+
+        serializer.save()
+
+    # ------------------------------------------------------------------------
+    # UPDATE
+    # ------------------------------------------------------------------------
+
+    def perform_update(self, serializer):
+
+        if not _is_staff_role(self.request.user):
+
+            raise PermissionDenied(
+                "Only staff users can update options."
+            )
+
+        serializer.save()
+
+    # ------------------------------------------------------------------------
+    # DELETE
+    # ------------------------------------------------------------------------
+
+    def perform_destroy(self, instance):
+
+        if not _is_staff_role(self.request.user):
+
+            raise PermissionDenied(
+                "Only staff users can delete options."
+            )
+
+        instance.delete()
 
 
 # ============================================================================
@@ -193,20 +432,25 @@ class OptionViewSet(viewsets.ModelViewSet):
 # ============================================================================
 
 class AttemptViewSet(viewsets.ModelViewSet):
-    permission_classes = [IsAuthenticated]
+
+    permission_classes = [
+        IsAuthenticated,
+    ]
 
     # ------------------------------------------------------------------------
     # QUERYSET
     # ------------------------------------------------------------------------
 
     def get_queryset(self):
+
         user = self.request.user
 
-        # --------------------------------------------------------------
+        # --------------------------------------------------------------------
         # STAFF
-        # --------------------------------------------------------------
+        # --------------------------------------------------------------------
 
         if _is_staff_role(user):
+
             return (
                 Attempt.objects
                 .select_related(
@@ -221,16 +465,18 @@ class AttemptViewSet(viewsets.ModelViewSet):
                 .order_by("-started_at")
             )
 
-        # --------------------------------------------------------------
+        # --------------------------------------------------------------------
         # STUDENT
-        # --------------------------------------------------------------
+        # --------------------------------------------------------------------
 
         if not _has_mcq_access(user):
+
             return Attempt.objects.none()
 
         try:
             student_profile = user.student_profile
         except Exception:
+
             return Attempt.objects.none()
 
         return (
@@ -254,7 +500,9 @@ class AttemptViewSet(viewsets.ModelViewSet):
     # ------------------------------------------------------------------------
 
     def get_serializer_class(self):
+
         if self.action == "submit_answer":
+
             return SubmitAnswerSerializer
 
         return AttemptSerializer
@@ -264,10 +512,10 @@ class AttemptViewSet(viewsets.ModelViewSet):
     # ------------------------------------------------------------------------
 
     def perform_create(self, serializer):
+
         user = self.request.user
 
         if not _has_mcq_access(user):
-            from rest_framework.exceptions import PermissionDenied
 
             raise PermissionDenied(
                 "You do not have access to the MCQ module."
@@ -276,7 +524,6 @@ class AttemptViewSet(viewsets.ModelViewSet):
         try:
             student_profile = user.student_profile
         except Exception:
-            from rest_framework.exceptions import PermissionDenied
 
             raise PermissionDenied(
                 "Student profile not found."
@@ -286,44 +533,45 @@ class AttemptViewSet(viewsets.ModelViewSet):
             "question_set"
         ]
 
-        # --------------------------------------------------------------
-        # Make sure students cannot attempt inactive question sets.
-        # --------------------------------------------------------------
+        # Students can only attempt active question sets.
 
         if (
             not _is_staff_role(user)
             and not question_set.is_active
         ):
-            from rest_framework.exceptions import ValidationError
 
-            raise ValidationError(
-                {
-                    "question_set":
-                        "This question set is not active."
-                }
-            )
+            raise ValidationError({
+                "question_set":
+                    "This question set is not active."
+            })
 
         serializer.save(
             student=student_profile,
         )
 
-    # ==========================================================================
+    # =========================================================================
     # SUBMIT ANSWER
-    # ==========================================================================
+    # =========================================================================
 
     @action(
         detail=True,
         methods=["post"],
         url_path="answer",
     )
-    def submit_answer(self, request, pk=None):
+    def submit_answer(
+        self,
+        request,
+        pk=None,
+    ):
+
         attempt = self.get_object()
 
-        # ----------------------------------------------------------------------
-        # CHECK ACCESS
-        # ----------------------------------------------------------------------
+        # ---------------------------------------------------------------------
+        # ACCESS
+        # ---------------------------------------------------------------------
 
         if not _has_mcq_access(request.user):
+
             return Response(
                 {
                     "detail":
@@ -332,15 +580,16 @@ class AttemptViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        # ----------------------------------------------------------------------
-        # CHECK OWNERSHIP
-        # ----------------------------------------------------------------------
+        # ---------------------------------------------------------------------
+        # OWNERSHIP
+        # ---------------------------------------------------------------------
 
         if not _is_staff_role(request.user):
 
             try:
                 student_profile = request.user.student_profile
             except Exception:
+
                 return Response(
                     {
                         "detail":
@@ -350,6 +599,7 @@ class AttemptViewSet(viewsets.ModelViewSet):
                 )
 
             if attempt.student_id != student_profile.id:
+
                 return Response(
                     {
                         "detail":
@@ -358,11 +608,12 @@ class AttemptViewSet(viewsets.ModelViewSet):
                     status=status.HTTP_403_FORBIDDEN,
                 )
 
-        # ----------------------------------------------------------------------
-        # CHECK STATUS
-        # ----------------------------------------------------------------------
+        # ---------------------------------------------------------------------
+        # STATUS
+        # ---------------------------------------------------------------------
 
         if attempt.status != Attempt.Status.IN_PROGRESS:
+
             return Response(
                 {
                     "detail":
@@ -371,16 +622,16 @@ class AttemptViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # ----------------------------------------------------------------------
-        # VALIDATE REQUEST
-        # ----------------------------------------------------------------------
+        # ---------------------------------------------------------------------
+        # VALIDATE
+        # ---------------------------------------------------------------------
 
         serializer = SubmitAnswerSerializer(
-            data=request.data
+            data=request.data,
         )
 
         serializer.is_valid(
-            raise_exception=True
+            raise_exception=True,
         )
 
         question = serializer.validated_data[
@@ -388,52 +639,63 @@ class AttemptViewSet(viewsets.ModelViewSet):
         ]
 
         selected_option = serializer.validated_data.get(
-            "selected_option"
+            "selected_option",
         )
 
-        # ----------------------------------------------------------------------
-        # QUESTION MUST BELONG TO QUESTION SET
-        # ----------------------------------------------------------------------
+        # ---------------------------------------------------------------------
+        # QUESTION BELONGS TO QUESTION SET
+        # ---------------------------------------------------------------------
 
         if question.question_set_id != attempt.question_set_id:
+
             return Response(
                 {
                     "detail":
-                        "This question does not belong to this question set."
+                        "This question does not belong "
+                        "to this question set."
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # ----------------------------------------------------------------------
-        # OPTION MUST BELONG TO QUESTION
-        # ----------------------------------------------------------------------
+        # ---------------------------------------------------------------------
+        # OPTION BELONGS TO QUESTION
+        # ---------------------------------------------------------------------
 
         if selected_option is not None:
+
             if selected_option.question_id != question.id:
+
                 return Response(
                     {
                         "detail":
-                            "This option does not belong to this question."
+                            "This option does not belong "
+                            "to this question."
                     },
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
-        # ----------------------------------------------------------------------
-        # CREATE / UPDATE ANSWER
-        # ----------------------------------------------------------------------
+        # ---------------------------------------------------------------------
+        # CHECK CORRECTNESS
+        # ---------------------------------------------------------------------
 
         is_correct = (
             selected_option is not None
             and selected_option.is_correct
         )
 
-        answer, created = AttemptAnswer.objects.update_or_create(
-            attempt=attempt,
-            question=question,
-            defaults={
-                "selected_option": selected_option,
-                "is_correct": is_correct,
-            },
+        # ---------------------------------------------------------------------
+        # CREATE / UPDATE ANSWER
+        # ---------------------------------------------------------------------
+
+        answer, created = (
+            AttemptAnswer.objects.update_or_create(
+                attempt=attempt,
+                question=question,
+                defaults={
+                    "selected_option": selected_option,
+                    "is_correct": is_correct,
+                },
+            )
         )
 
         return Response(
@@ -445,23 +707,29 @@ class AttemptViewSet(viewsets.ModelViewSet):
             ),
         )
 
-    # ==========================================================================
+    # =========================================================================
     # FINISH ATTEMPT
-    # ==========================================================================
+    # =========================================================================
 
     @action(
         detail=True,
         methods=["post"],
         url_path="finish",
     )
-    def finish(self, request, pk=None):
+    def finish(
+        self,
+        request,
+        pk=None,
+    ):
+
         attempt = self.get_object()
 
-        # ----------------------------------------------------------------------
-        # CHECK ACCESS
-        # ----------------------------------------------------------------------
+        # ---------------------------------------------------------------------
+        # ACCESS
+        # ---------------------------------------------------------------------
 
         if not _has_mcq_access(request.user):
+
             return Response(
                 {
                     "detail":
@@ -470,15 +738,16 @@ class AttemptViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        # ----------------------------------------------------------------------
-        # CHECK OWNERSHIP
-        # ----------------------------------------------------------------------
+        # ---------------------------------------------------------------------
+        # OWNERSHIP
+        # ---------------------------------------------------------------------
 
         if not _is_staff_role(request.user):
 
             try:
                 student_profile = request.user.student_profile
             except Exception:
+
                 return Response(
                     {
                         "detail":
@@ -488,6 +757,7 @@ class AttemptViewSet(viewsets.ModelViewSet):
                 )
 
             if attempt.student_id != student_profile.id:
+
                 return Response(
                     {
                         "detail":
@@ -496,11 +766,12 @@ class AttemptViewSet(viewsets.ModelViewSet):
                     status=status.HTTP_403_FORBIDDEN,
                 )
 
-        # ----------------------------------------------------------------------
-        # CHECK STATUS
-        # ----------------------------------------------------------------------
+        # ---------------------------------------------------------------------
+        # STATUS
+        # ---------------------------------------------------------------------
 
         if attempt.status != Attempt.Status.IN_PROGRESS:
+
             return Response(
                 {
                     "detail":
@@ -509,24 +780,25 @@ class AttemptViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # ----------------------------------------------------------------------
-        # FINISH ATTEMPT
-        # ----------------------------------------------------------------------
+        # ---------------------------------------------------------------------
+        # FINISH
+        # ---------------------------------------------------------------------
 
         attempt.status = Attempt.Status.SUBMITTED
+
         attempt.save(
-            update_fields=["status"]
+            update_fields=["status"],
         )
 
-        # ----------------------------------------------------------------------
+        # ---------------------------------------------------------------------
         # GRADE
-        # ----------------------------------------------------------------------
+        # ---------------------------------------------------------------------
 
         attempt.grade()
 
-        # ----------------------------------------------------------------------
-        # QUESTION REVIEW
-        # ----------------------------------------------------------------------
+        # ---------------------------------------------------------------------
+        # QUESTION RESULTS
+        # ---------------------------------------------------------------------
 
         answers = (
             attempt.answers
@@ -536,13 +808,14 @@ class AttemptViewSet(viewsets.ModelViewSet):
             )
             .all()
             .order_by(
-                "question__order"
+                "question__order",
             )
         )
 
         question_results = []
 
         for answer in answers:
+
             question_results.append(
                 {
                     "question_id":
@@ -556,9 +829,9 @@ class AttemptViewSet(viewsets.ModelViewSet):
                 }
             )
 
-        # ----------------------------------------------------------------------
+        # ---------------------------------------------------------------------
         # RESPONSE
-        # ----------------------------------------------------------------------
+        # ---------------------------------------------------------------------
 
         return Response(
             {
@@ -571,22 +844,26 @@ class AttemptViewSet(viewsets.ModelViewSet):
             status=status.HTTP_200_OK,
         )
 
-    # ==========================================================================
+    # =========================================================================
     # LEADERBOARD
-    # ==========================================================================
+    # =========================================================================
 
     @action(
         detail=False,
         methods=["get"],
         url_path="leaderboard",
     )
-    def leaderboard(self, request):
+    def leaderboard(
+        self,
+        request,
+    ):
 
-        # ----------------------------------------------------------------------
-        # CHECK ACCESS
-        # ----------------------------------------------------------------------
+        # ---------------------------------------------------------------------
+        # ACCESS
+        # ---------------------------------------------------------------------
 
         if not _has_mcq_access(request.user):
+
             return Response(
                 {
                     "detail":
@@ -595,8 +872,8 @@ class AttemptViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        # ----------------------------------------------------------------------
-        # LEADERBOARD QUERY
+        # ---------------------------------------------------------------------
+        # LEADERBOARD
         #
         # Ranking:
         #
@@ -604,7 +881,7 @@ class AttemptViewSet(viewsets.ModelViewSet):
         # 2. Highest best percentage
         # 3. Most completed quizzes
         # 4. Username alphabetically
-        # ----------------------------------------------------------------------
+        # ---------------------------------------------------------------------
 
         leaderboard = (
             Attempt.objects
@@ -620,20 +897,19 @@ class AttemptViewSet(viewsets.ModelViewSet):
                 "student__user__email",
             )
             .annotate(
-                # Highest percentage achieved by the student
-                best_percentage=Max("percentage"),
+                best_percentage=Max(
+                    "percentage",
+                ),
 
-                # Number of completed/submitted quizzes
                 completed_quizzes=Count(
                     "id",
                     distinct=True,
                 ),
 
-                # Number of correctly answered questions
                 questions_solved=Count(
                     "answers",
                     filter=Q(
-                        answers__is_correct=True
+                        answers__is_correct=True,
                     ),
                     distinct=True,
                 ),
@@ -646,9 +922,9 @@ class AttemptViewSet(viewsets.ModelViewSet):
             )
         )
 
-        # ----------------------------------------------------------------------
-        # FORMAT RESULTS
-        # ----------------------------------------------------------------------
+        # ---------------------------------------------------------------------
+        # FORMAT
+        # ---------------------------------------------------------------------
 
         results = []
 
@@ -656,13 +932,18 @@ class AttemptViewSet(viewsets.ModelViewSet):
             leaderboard,
             start=1,
         ):
+
             first_name = (
-                item["student__user__first_name"]
+                item[
+                    "student__user__first_name"
+                ]
                 or ""
             )
 
             last_name = (
-                item["student__user__last_name"]
+                item[
+                    "student__user__last_name"
+                ]
                 or ""
             )
 
@@ -671,14 +952,19 @@ class AttemptViewSet(viewsets.ModelViewSet):
                 .strip()
             )
 
-            # ------------------------------------------------------------------
+            # -----------------------------------------------------------------
             # FALLBACK NAME
-            # ------------------------------------------------------------------
+            # -----------------------------------------------------------------
 
             if not name:
+
                 name = (
-                    item["student__user__username"]
-                    or item["student__user__email"]
+                    item[
+                        "student__user__username"
+                    ]
+                    or item[
+                        "student__user__email"
+                    ]
                 )
 
             results.append(
@@ -692,7 +978,8 @@ class AttemptViewSet(viewsets.ModelViewSet):
                     ],
 
                     "score":
-                        item["best_percentage"] or 0,
+                        item["best_percentage"]
+                        or 0,
 
                     "completed_quizzes":
                         item["completed_quizzes"],
@@ -702,18 +989,14 @@ class AttemptViewSet(viewsets.ModelViewSet):
                 }
             )
 
-        # ----------------------------------------------------------------------
+        # ---------------------------------------------------------------------
         # SERIALIZE
-        # ----------------------------------------------------------------------
+        # ---------------------------------------------------------------------
 
         serializer = LeaderboardSerializer(
             results,
             many=True,
         )
-
-        # ----------------------------------------------------------------------
-        # RESPONSE
-        # ----------------------------------------------------------------------
 
         return Response(
             {
