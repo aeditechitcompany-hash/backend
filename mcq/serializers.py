@@ -308,19 +308,13 @@ class SubmitAnswerSerializer(
 # LEADERBOARD
 # ============================================================
 
-class LeaderboardSerializer(
-    serializers.Serializer
-):
-
+class LeaderboardSerializer(serializers.Serializer):
     rank = serializers.IntegerField()
-
     name = serializers.CharField()
-
     email = serializers.EmailField()
-
     score = serializers.DecimalField(
         max_digits=5,
         decimal_places=2,
     )
-
     completed_quizzes = serializers.IntegerField()
+    questions_solved = serializers.IntegerField()
