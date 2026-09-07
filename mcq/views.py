@@ -1,6 +1,12 @@
 from django.utils import timezone
+from django.db.models import Max, Count
 
-from rest_framework import viewsets, permissions, status
+from rest_framework import (
+    viewsets,
+    permissions,
+    status,
+)
+
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.exceptions import PermissionDenied
@@ -25,6 +31,7 @@ from .serializers import (
     OptionSerializer,
     AttemptSerializer,
     SubmitAnswerSerializer,
+    LeaderboardSerializer,
 )
 
 
@@ -37,7 +44,11 @@ def _is_staff_role(user):
     Returns True for superusers, admins and counselors.
     """
 
-    if not getattr(user, "is_authenticated", False):
+    if not getattr(
+        user,
+        "is_authenticated",
+        False,
+    ):
         return False
 
     return (
@@ -65,7 +76,9 @@ def _has_mcq_access(user):
         return True
 
     try:
-        student = StudentProfile.objects.get(user=user)
+        student = StudentProfile.objects.get(
+            user=user
+        )
     except StudentProfile.DoesNotExist:
         return False
 
@@ -76,7 +89,9 @@ def _has_mcq_access(user):
 # QUESTION SET VIEWSET
 # ============================================================
 
-class QuestionSetViewSet(viewsets.ModelViewSet):
+class QuestionSetViewSet(
+    viewsets.ModelViewSet
+):
     """
     Admin/Counselor:
         Full CRUD access to question sets.
@@ -96,11 +111,13 @@ class QuestionSetViewSet(viewsets.ModelViewSet):
             if (
                 self.request
                 and self.request.user.is_authenticated
-                and _is_staff_role(self.request.user)
+                and _is_staff_role(
+                    self.request.user
+                )
             ):
                 return QuestionSetDetailSerializer
 
-            # Students get the public version without answer keys.
+            # Students get public version.
             return QuestionSetTakeSerializer
 
         return QuestionSetSerializer
@@ -108,27 +125,33 @@ class QuestionSetViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
 
         qs = QuestionSet.objects.all()
+
         user = self.request.user
 
-        # Not authenticated
-        if not user or not user.is_authenticated:
+        # Not authenticated.
+        if (
+            not user
+            or not user.is_authenticated
+        ):
             return qs.none()
 
-        # Admin / Counselor / Superuser
+        # Admin / Counselor / Superuser.
         if _is_staff_role(user):
             return qs
 
-        # Student MCQ access check
+        # Student MCQ access check.
         if not _has_mcq_access(user):
             return qs.none()
 
-        # Student with access
+        # Student with access.
         # Only active sets are visible.
-        return qs.filter(is_active=True)
+        return qs.filter(
+            is_active=True
+        )
 
     def get_permissions(self):
 
-        # Only counselors can create/update/delete question sets.
+        # Only counselors can create/update/delete.
         if self.action in (
             "create",
             "update",
@@ -137,29 +160,37 @@ class QuestionSetViewSet(viewsets.ModelViewSet):
         ):
             return [IsCounselor()]
 
-        # Everyone else must be authenticated.
-        return [permissions.IsAuthenticated()]
+        # Everyone else must authenticate.
+        return [
+            permissions.IsAuthenticated()
+        ]
 
     def perform_create(self, serializer):
-        serializer.save(created_by=self.request.user)
+
+        serializer.save(
+            created_by=self.request.user
+        )
 
     @action(
         detail=True,
         methods=["get"],
         url_path="take",
     )
-    def take(self, request, pk=None):
+    def take(
+        self,
+        request,
+        pk=None,
+    ):
         """
-        Returns the answer-key-free version of a question set.
-
-        A student can only reach this if mcq_access=True because
-        get_object() uses get_queryset().
+        Returns answer-key-free question set.
         """
 
         question_set = self.get_object()
 
         return Response(
-            QuestionSetTakeSerializer(question_set).data
+            QuestionSetTakeSerializer(
+                question_set
+            ).data
         )
 
 
@@ -167,15 +198,21 @@ class QuestionSetViewSet(viewsets.ModelViewSet):
 # QUESTION VIEWSET
 # ============================================================
 
-class QuestionViewSet(viewsets.ModelViewSet):
+class QuestionViewSet(
+    viewsets.ModelViewSet
+):
     """
-    Manage individual questions within a question set.
+    Manage individual questions.
     """
 
     queryset = (
         Question.objects
-        .select_related("question_set")
-        .prefetch_related("options")
+        .select_related(
+            "question_set"
+        )
+        .prefetch_related(
+            "options"
+        )
     )
 
     serializer_class = QuestionSerializer
@@ -187,7 +224,7 @@ class QuestionViewSet(viewsets.ModelViewSet):
 
     def get_permissions(self):
 
-        # Only counselors can create/update/delete questions.
+        # Only counselors can modify questions.
         if self.action in (
             "create",
             "update",
@@ -196,18 +233,20 @@ class QuestionViewSet(viewsets.ModelViewSet):
         ):
             return [IsCounselor()]
 
-        return [permissions.IsAuthenticated()]
+        return [
+            permissions.IsAuthenticated()
+        ]
 
     def get_queryset(self):
-        """
-        Prevent students without MCQ access from directly
-        requesting questions by question-set ID.
-        """
 
         qs = super().get_queryset()
+
         user = self.request.user
 
-        if not user or not user.is_authenticated:
+        if (
+            not user
+            or not user.is_authenticated
+        ):
             return qs.none()
 
         # Staff can access all questions.
@@ -218,7 +257,7 @@ class QuestionViewSet(viewsets.ModelViewSet):
         if not _has_mcq_access(user):
             return qs.none()
 
-        # Students can access questions belonging to active sets.
+        # Students only access active sets.
         return qs.filter(
             question_set__is_active=True
         )
@@ -228,7 +267,9 @@ class QuestionViewSet(viewsets.ModelViewSet):
 # OPTION VIEWSET
 # ============================================================
 
-class OptionViewSet(viewsets.ModelViewSet):
+class OptionViewSet(
+    viewsets.ModelViewSet
+):
     """
     Manage answer options.
     """
@@ -253,18 +294,20 @@ class OptionViewSet(viewsets.ModelViewSet):
         ):
             return [IsCounselor()]
 
-        return [permissions.IsAuthenticated()]
+        return [
+            permissions.IsAuthenticated()
+        ]
 
     def get_queryset(self):
-        """
-        Prevent students without MCQ access from directly
-        accessing options.
-        """
 
         qs = super().get_queryset()
+
         user = self.request.user
 
-        if not user or not user.is_authenticated:
+        if (
+            not user
+            or not user.is_authenticated
+        ):
             return qs.none()
 
         # Staff can access everything.
@@ -275,7 +318,7 @@ class OptionViewSet(viewsets.ModelViewSet):
         if not _has_mcq_access(user):
             return qs.none()
 
-        # Only options belonging to active question sets.
+        # Only options belonging to active sets.
         return qs.filter(
             question__question_set__is_active=True
         )
@@ -285,7 +328,9 @@ class OptionViewSet(viewsets.ModelViewSet):
 # ATTEMPT VIEWSET
 # ============================================================
 
-class AttemptViewSet(viewsets.ModelViewSet):
+class AttemptViewSet(
+    viewsets.ModelViewSet
+):
     """
     A student's attempt at a question set.
 
@@ -304,7 +349,9 @@ class AttemptViewSet(viewsets.ModelViewSet):
             "student__user",
             "question_set",
         )
-        .prefetch_related("answers")
+        .prefetch_related(
+            "answers"
+        )
     )
 
     serializer_class = AttemptSerializer
@@ -316,58 +363,268 @@ class AttemptViewSet(viewsets.ModelViewSet):
         "passed",
     ]
 
+    # ========================================================
+    # GET ATTEMPTS
+    # ========================================================
+
     def get_queryset(self):
 
         qs = super().get_queryset()
+
         user = self.request.user
 
-        # Admin / Counselor / Superuser
+        # Admin / Counselor / Superuser.
         if _is_staff_role(user):
             return qs
 
-        # Student
+        # Student.
         try:
             student = StudentProfile.objects.get(
                 user=user
             )
+
         except StudentProfile.DoesNotExist:
             return qs.none()
 
-        # MCQ access check
+        # MCQ access check.
         if not student.mcq_access:
             return qs.none()
 
-        # Student can only see own attempts
-        return qs.filter(student=student)
+        # Student can only see own attempts.
+        return qs.filter(
+            student=student
+        )
 
-    def perform_create(self, serializer):
+    # ========================================================
+    # CREATE ATTEMPT
+    # ========================================================
+
+    def perform_create(
+        self,
+        serializer,
+    ):
 
         user = self.request.user
 
-        # Admin / Counselor / Superuser
+        # Admin / Counselor / Superuser.
         if _is_staff_role(user):
+
             serializer.save()
+
             return
 
-        # Student
+        # Student.
         try:
-            student_profile = StudentProfile.objects.get(
-                user=user
+
+            student_profile = (
+                StudentProfile.objects.get(
+                    user=user
+                )
             )
+
         except StudentProfile.DoesNotExist:
+
             raise PermissionDenied(
                 "Student profile does not exist."
             )
 
-        # MCQ ACCESS CHECK
+        # MCQ access check.
         if not student_profile.mcq_access:
+
             raise PermissionDenied(
-                "MCQ access has not been granted by an administrator."
+                "MCQ access has not been granted "
+                "by an administrator."
             )
 
-        # Force the attempt to belong to logged-in student
+        # Force attempt to logged-in student.
         serializer.save(
             student=student_profile
+        )
+
+    # ========================================================
+    # LEADERBOARD
+    # ========================================================
+
+    @action(
+        detail=False,
+        methods=["get"],
+        url_path="leaderboard",
+    )
+    def leaderboard(
+        self,
+        request,
+    ):
+        """
+        Returns the MCQ leaderboard.
+
+        Only submitted attempts count.
+
+        Each student is ranked using their BEST
+        percentage score.
+
+        Tie breaker:
+            1. Best percentage
+            2. Number of different completed quizzes
+            3. Username
+        """
+
+        # ----------------------------------------------------
+        # CHECK ACCESS
+        # ----------------------------------------------------
+
+        if not _has_mcq_access(
+            request.user
+        ):
+
+            return Response(
+                {
+                    "detail": (
+                        "You do not have access "
+                        "to the MCQ module."
+                    )
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # ----------------------------------------------------
+        # GET LEADERBOARD DATA
+        # ----------------------------------------------------
+
+        leaderboard = (
+            Attempt.objects
+
+            # Only completed/submitted attempts.
+            .filter(
+                status=Attempt.Status.SUBMITTED,
+
+                # Only active users.
+                student__user__is_active=True,
+            )
+
+            # Group by student.
+            .values(
+                "student_id",
+
+                "student__user__first_name",
+
+                "student__user__last_name",
+
+                "student__user__username",
+
+                "student__user__email",
+            )
+
+            # Calculate best score.
+            .annotate(
+
+                best_percentage=Max(
+                    "percentage"
+                ),
+
+                # Count unique quizzes.
+                completed_quizzes=Count(
+                    "question_set",
+                    distinct=True,
+                ),
+            )
+
+            # Highest score first.
+            .order_by(
+                "-best_percentage",
+
+                # If tied, more quizzes first.
+                "-completed_quizzes",
+
+                # Final deterministic ordering.
+                "student__user__username",
+            )
+        )
+
+        # ----------------------------------------------------
+        # BUILD RESPONSE
+        # ----------------------------------------------------
+
+        results = []
+
+        for index, item in enumerate(
+            leaderboard,
+            start=1,
+        ):
+
+            first_name = (
+                item[
+                    "student__user__first_name"
+                ]
+                or ""
+            )
+
+            last_name = (
+                item[
+                    "student__user__last_name"
+                ]
+                or ""
+            )
+
+            # Build full name.
+            name = (
+                f"{first_name} {last_name}"
+                .strip()
+            )
+
+            # Fallback if name isn't available.
+            if not name:
+
+                name = (
+                    item[
+                        "student__user__username"
+                    ]
+                    or item[
+                        "student__user__email"
+                    ]
+                )
+
+            results.append(
+                {
+                    "rank": index,
+
+                    "name": name,
+
+                    "email": item[
+                        "student__user__email"
+                    ],
+
+                    "score": (
+                        item[
+                            "best_percentage"
+                        ]
+                        or 0
+                    ),
+
+                    "completed_quizzes": item[
+                        "completed_quizzes"
+                    ],
+                }
+            )
+
+        # ----------------------------------------------------
+        # SERIALIZE
+        # ----------------------------------------------------
+
+        serializer = LeaderboardSerializer(
+            results,
+            many=True,
+        )
+
+        # ----------------------------------------------------
+        # RESPONSE
+        # ----------------------------------------------------
+
+        return Response(
+            {
+                "count": len(results),
+
+                "results": serializer.data,
+            }
         )
 
     # ========================================================
@@ -379,9 +636,14 @@ class AttemptViewSet(viewsets.ModelViewSet):
         methods=["post"],
         url_path="answer",
     )
-    def submit_answer(self, request, pk=None):
+    def submit_answer(
+        self,
+        request,
+        pk=None,
+    ):
         """
-        Submit or update one answer within an in-progress attempt.
+        Submit or update one answer
+        within an in-progress attempt.
         """
 
         attempt = self.get_object()
@@ -390,27 +652,40 @@ class AttemptViewSet(viewsets.ModelViewSet):
         # CHECK MCQ ACCESS
         # ----------------------------------------------------
 
-        if not _is_staff_role(request.user):
+        if not _is_staff_role(
+            request.user
+        ):
 
-            if attempt.student.user != request.user:
+            if (
+                attempt.student.user
+                != request.user
+            ):
+
                 raise PermissionDenied(
                     "You cannot access this attempt."
                 )
 
             if not attempt.student.mcq_access:
+
                 raise PermissionDenied(
-                    "MCQ access has not been granted by an administrator."
+                    "MCQ access has not been granted "
+                    "by an administrator."
                 )
 
         # ----------------------------------------------------
         # CHECK ATTEMPT STATUS
         # ----------------------------------------------------
 
-        if attempt.status != Attempt.Status.IN_PROGRESS:
+        if (
+            attempt.status
+            != Attempt.Status.IN_PROGRESS
+        ):
+
             return Response(
                 {
                     "detail": (
-                        "This attempt is no longer in progress."
+                        "This attempt is no longer "
+                        "in progress."
                     )
                 },
                 status=status.HTTP_400_BAD_REQUEST,
@@ -428,44 +703,58 @@ class AttemptViewSet(viewsets.ModelViewSet):
             raise_exception=True
         )
 
-        question = serializer.validated_data["question"]
+        question = (
+            serializer.validated_data[
+                "question"
+            ]
+        )
 
-        selected_option = serializer.validated_data.get(
-            "selected_option"
+        selected_option = (
+            serializer.validated_data.get(
+                "selected_option"
+            )
         )
 
         # ----------------------------------------------------
-        # QUESTION MUST BELONG TO THIS QUESTION SET
-        # ----------------------------------------------------
-
-        if question.question_set_id != attempt.question_set_id:
-            return Response(
-                {
-                    "detail": (
-                        "This question does not belong "
-                        "to this question set."
-                    )
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        # ----------------------------------------------------
-        # OPTION MUST BELONG TO THIS QUESTION
+        # QUESTION MUST BELONG TO SET
         # ----------------------------------------------------
 
         if (
-            selected_option
-            and selected_option.question_id != question.id
+            question.question_set_id
+            != attempt.question_set_id
         ):
+
             return Response(
                 {
                     "detail": (
-                        "The selected option does not "
-                        "belong to this question."
+                        "This question does not "
+                        "belong to this question set."
                     )
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
+
+        # ----------------------------------------------------
+        # OPTION MUST BELONG TO QUESTION
+        # ----------------------------------------------------
+
+        if selected_option:
+
+            if (
+                selected_option.question_id
+                != question.id
+            ):
+
+                return Response(
+                    {
+                        "detail": (
+                            "The selected option "
+                            "does not belong to "
+                            "this question."
+                        )
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
         # ----------------------------------------------------
         # SAVE / UPDATE ANSWER
@@ -473,14 +762,18 @@ class AttemptViewSet(viewsets.ModelViewSet):
 
         AttemptAnswer.objects.update_or_create(
             attempt=attempt,
+
             question=question,
+
             defaults={
                 "selected_option": selected_option
             },
         )
 
         return Response(
-            AttemptSerializer(attempt).data
+            AttemptSerializer(
+                attempt
+            ).data
         )
 
     # ========================================================
@@ -492,10 +785,14 @@ class AttemptViewSet(viewsets.ModelViewSet):
         methods=["post"],
         url_path="finish",
     )
-    def finish(self, request, pk=None):
+    def finish(
+        self,
+        request,
+        pk=None,
+    ):
         """
         Finish the attempt, calculate the final score,
-        and return question-by-question review information.
+        and return question-by-question review.
         """
 
         attempt = self.get_object()
@@ -504,36 +801,55 @@ class AttemptViewSet(viewsets.ModelViewSet):
         # CHECK OWNERSHIP / ACCESS
         # ----------------------------------------------------
 
-        if not _is_staff_role(request.user):
+        if not _is_staff_role(
+            request.user
+        ):
 
-            if attempt.student.user != request.user:
+            if (
+                attempt.student.user
+                != request.user
+            ):
+
                 raise PermissionDenied(
                     "You cannot finish this attempt."
                 )
 
             if not attempt.student.mcq_access:
+
                 raise PermissionDenied(
-                    "MCQ access has not been granted by an administrator."
+                    "MCQ access has not been granted "
+                    "by an administrator."
                 )
 
         # ----------------------------------------------------
         # CHECK IF ALREADY FINISHED
         # ----------------------------------------------------
 
-        if attempt.status != Attempt.Status.IN_PROGRESS:
+        if (
+            attempt.status
+            != Attempt.Status.IN_PROGRESS
+        ):
+
             return Response(
                 {
-                    "detail": "This attempt is already finished."
+                    "detail": (
+                        "This attempt is already finished."
+                    )
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
         # ----------------------------------------------------
-        # MARK ATTEMPT AS SUBMITTED
+        # MARK AS SUBMITTED
         # ----------------------------------------------------
 
-        attempt.status = Attempt.Status.SUBMITTED
-        attempt.submitted_at = timezone.now()
+        attempt.status = (
+            Attempt.Status.SUBMITTED
+        )
+
+        attempt.submitted_at = (
+            timezone.now()
+        )
 
         attempt.save(
             update_fields=[
@@ -549,25 +865,37 @@ class AttemptViewSet(viewsets.ModelViewSet):
         attempt.grade()
 
         # ----------------------------------------------------
-        # GET ALL QUESTIONS
+        # GET QUESTIONS
         # ----------------------------------------------------
 
         questions = (
             Question.objects
+
             .filter(
                 question_set=attempt.question_set
             )
-            .prefetch_related("options")
-            .order_by("order", "id")
+
+            .prefetch_related(
+                "options"
+            )
+
+            .order_by(
+                "order",
+                "id",
+            )
         )
 
         # ----------------------------------------------------
-        # GET ATTEMPT ANSWERS
+        # GET ANSWERS
         # ----------------------------------------------------
 
         attempt_answers = (
             AttemptAnswer.objects
-            .filter(attempt=attempt)
+
+            .filter(
+                attempt=attempt
+            )
+
             .select_related(
                 "question",
                 "selected_option",
@@ -587,7 +915,7 @@ class AttemptViewSet(viewsets.ModelViewSet):
 
         for question in questions:
 
-            # Student's answer
+            # Student's answer.
             answer = answer_map.get(
                 question.id
             )
@@ -598,14 +926,16 @@ class AttemptViewSet(viewsets.ModelViewSet):
                 else None
             )
 
-            # Actual correct option
+            # Correct answer.
             correct_option = (
                 question.options
-                .filter(is_correct=True)
+                .filter(
+                    is_correct=True
+                )
                 .first()
             )
 
-            # Determine if selected answer is correct
+            # Check correctness.
             is_correct = (
                 selected_option is not None
                 and correct_option is not None
@@ -619,13 +949,15 @@ class AttemptViewSet(viewsets.ModelViewSet):
 
                     "selected_option_id": (
                         selected_option.id
-                        if selected_option is not None
+                        if selected_option
+                        is not None
                         else None
                     ),
 
                     "correct_option_id": (
                         correct_option.id
-                        if correct_option is not None
+                        if correct_option
+                        is not None
                         else None
                     ),
 
@@ -641,10 +973,9 @@ class AttemptViewSet(viewsets.ModelViewSet):
             attempt
         ).data
 
-        # Add question-by-question review data
-        response_data["question_results"] = (
-            question_results
-        )
+        response_data[
+            "question_results"
+        ] = question_results
 
         return Response(
             response_data

@@ -291,7 +291,9 @@ class SubmitAnswerSerializer(
         selected_option = attrs.get("selected_option")
 
         if selected_option is not None:
+
             if selected_option.question_id != question.id:
+
                 raise serializers.ValidationError({
                     "selected_option": (
                         "Selected option does not belong "
@@ -300,3 +302,25 @@ class SubmitAnswerSerializer(
                 })
 
         return attrs
+
+
+# ============================================================
+# LEADERBOARD
+# ============================================================
+
+class LeaderboardSerializer(
+    serializers.Serializer
+):
+
+    rank = serializers.IntegerField()
+
+    name = serializers.CharField()
+
+    email = serializers.EmailField()
+
+    score = serializers.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+    )
+
+    completed_quizzes = serializers.IntegerField()
