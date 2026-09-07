@@ -641,6 +641,35 @@ class AttemptViewSet(viewsets.ModelViewSet):
         selected_option = serializer.validated_data.get(
             "selected_option",
         )
+        print("========================================")
+        print("MCQ ANSWER DEBUG")
+        print("Attempt:", attempt.id)
+        print("Question:", question.id)
+        print("Question text:", question.text)
+        print("Selected option:", selected_option.id if selected_option else None)
+        print(
+            "Selected option text:",
+            selected_option.text if selected_option else None,
+        )
+        print(
+            "Selected option is_correct:",
+            selected_option.is_correct if selected_option else None,
+        )
+
+        print("ALL OPTIONS:")
+        for option in question.options.all():
+            print(
+                "  ID:",
+                option.id,
+                "| TEXT:",
+                option.text,
+                "| CORRECT:",
+                option.is_correct,
+                "| ORDER:",
+                option.order,
+            )
+
+        print("========================================")
 
         # ---------------------------------------------------------------------
         # QUESTION BELONGS TO QUESTION SET
@@ -816,19 +845,27 @@ class AttemptViewSet(viewsets.ModelViewSet):
 
         for answer in answers:
 
-            question_results.append(
-                {
-                    "question_id":
-                        answer.question_id,
-
-                    "selected_option_id":
-                        answer.selected_option_id,
-
-                    "is_correct":
-                        answer.is_correct,
-                }
+            correct_option_id = (
+                Option.objects
+                .filter(
+                    question_id=answer.question_id,
+                    is_correct=True,
+                )
+                .values_list(
+                    "id",
+                    flat=True,
+                )
+                .first()
             )
 
+            question_results.append(
+                {
+                    "question_id": answer.question_id,
+                    "selected_option_id": answer.selected_option_id,
+                    "correct_option_id": correct_option_id,
+                    "is_correct": answer.is_correct,
+                }
+            )
         # ---------------------------------------------------------------------
         # RESPONSE
         # ---------------------------------------------------------------------
