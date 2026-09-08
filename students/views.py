@@ -20,6 +20,8 @@ class StudentProfileViewSet(viewsets.ModelViewSet):
         "user",
         "country",
         "nationality",
+        "process",
+        "process__current_stage",
     ).all()
 
     serializer_class = StudentProfileSerializer
