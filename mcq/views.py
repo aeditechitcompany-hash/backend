@@ -56,7 +56,11 @@ def _has_mcq_access(user):
 
     if _is_staff_role(user):
         return True
-
+    # UBT users have direct MCQ access.
+   
+    if getattr(user, "role", None) == "ubt":
+        return True
+    
     try:
         student_profile = user.student_profile
     except Exception:

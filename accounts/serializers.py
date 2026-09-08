@@ -1,7 +1,7 @@
 from django.contrib.auth import authenticate
 from django.utils import timezone
 from rest_framework import serializers
-
+from students.models import StudentProfile
 from .models import User, OTP, LoginHistory, Role, FeaturePermission, UserRole
 
 
@@ -25,9 +25,26 @@ class RegisterSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         password = validated_data.pop("password")
+
         user = User(**validated_data)
         user.set_password(password)
         user.save()
+
+        # ------------------------------------------------------------
+        # Create a minimal StudentProfile for UBT users.
+        # This allows UBT users to use the existing MCQ/Books system
+        # without requiring student academic information.
+        # ------------------------------------------------------------
+
+        if user.role == User.Role.UBT:
+            StudentProfile.objects.get_or_create(
+                user=user,
+                defaults={
+                    "mcq_access": True,
+                    "book_access": True,
+                },
+            )
+
         return user
 
 
