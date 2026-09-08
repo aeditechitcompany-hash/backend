@@ -9,6 +9,7 @@ from .managers import UserManager
 class User(AbstractUser):
     class Role(models.TextChoices):
         STUDENT = "student", _("Student")
+        UBT = "ubt", _("UBT")
         COUNSELOR = "counselor", _("Counselor")
         ADMIN = "admin", _("Admin")
         UNIVERSITY_PARTNER = "university_partner", _("University Partner")
@@ -116,7 +117,7 @@ class User(AbstractUser):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     email = models.EmailField(_("email address"), unique=True)
-    phone_number = models.CharField(max_length=20, blank=True, null=True, unique=True)
+    phone_number = models.CharField(max_length=20, blank=True, null=True)
     role = models.CharField(max_length=32, choices=Role.choices, default=Role.STUDENT)
     street_address = models.CharField(max_length=32,blank=True, null=True, )
     district = models.CharField(max_length=32, choices=District.choices, blank=True, null=True )
