@@ -1,0 +1,115 @@
+{% extends "admin/base_site.html" %}
+
+{% block content %}
+
+<div style="max-width:700px;">
+
+    <h1>Complete Process Stage</h1>
+
+    <div style="
+        background:#f8f9fa;
+        border:1px solid #ddd;
+        border-radius:8px;
+        padding:20px;
+        margin:20px 0;
+    ">
+
+        <p>
+            <strong>Student:</strong>
+            {{ original.student.user.get_full_name }}
+        </p>
+
+        <p>
+            <strong>Current Stage:</strong>
+            {{ current_stage.order }}.
+            {{ current_stage.name }}
+        </p>
+
+        {% if current_stage.description %}
+            <p>
+                <strong>Description:</strong>
+                {{ current_stage.description }}
+            </p>
+        {% endif %}
+
+    </div>
+
+    <div style="
+        background:#fff3cd;
+        border:1px solid #ffe69c;
+        border-radius:8px;
+        padding:15px;
+        margin-bottom:20px;
+    ">
+
+        <strong>What will happen?</strong>
+
+        <p>
+            This will mark the current stage as
+            <strong>Completed</strong> and move the student
+            to the next process stage.
+        </p>
+
+    </div>
+
+    <form method="post">
+
+        {% csrf_token %}
+
+        <div style="margin-bottom:20px;">
+
+            <label for="remarks">
+                <strong>Remarks (optional)</strong>
+            </label>
+
+            <br>
+
+            <textarea
+                name="remarks"
+                id="remarks"
+                rows="4"
+                style="
+                    width:100%;
+                    max-width:600px;
+                    margin-top:8px;
+                    padding:10px;
+                    border:1px solid #ccc;
+                    border-radius:5px;
+                "
+                placeholder="Add any remarks about this approval..."
+            ></textarea>
+
+        </div>
+
+        <button
+            type="submit"
+            style="
+                background:#198754;
+                color:white;
+                border:none;
+                padding:10px 18px;
+                border-radius:5px;
+                cursor:pointer;
+                font-weight:600;
+            "
+        >
+            ✓ Confirm & Complete Stage
+        </button>
+
+        <a
+            href="{% url 'admin:process_studentprocess_change' original.pk %}"
+            style="
+                margin-left:10px;
+                padding:10px 18px;
+                display:inline-block;
+                text-decoration:none;
+            "
+        >
+            Cancel
+        </a>
+
+    </form>
+
+</div>
+
+{% endblock %}
