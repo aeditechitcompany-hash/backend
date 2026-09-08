@@ -25,7 +25,10 @@ class StudentProfile(models.Model):
     assigned_counselor = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="assigned_students"
     )
-
+    current_step = models.PositiveSmallIntegerField(
+        default=1,
+        help_text="Current application step for the student.",
+    )
     mcq_access = models.BooleanField(
         default=False,
         help_text="Whether the student can access the MCQ module."

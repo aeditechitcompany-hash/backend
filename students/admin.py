@@ -12,6 +12,7 @@ class EducationInline(admin.TabularInline):
 class StudentProfileAdmin(admin.ModelAdmin):
     list_display = (
         "user",
+        "current_step",
         "country",
         "nationality",
         "assigned_counselor",
@@ -21,6 +22,7 @@ class StudentProfileAdmin(admin.ModelAdmin):
     )
 
     list_filter = (
+        "current_step",
         "mcq_access",
         "book_access",
         "country",
@@ -52,6 +54,7 @@ class StudentProfileAdmin(admin.ModelAdmin):
                     "emergency_contact_phone",
                     "bio",
                     "profile_completion_percentage",
+                    "current_step",
                     "assigned_counselor",
                 )
             },

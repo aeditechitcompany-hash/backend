@@ -57,6 +57,8 @@ class StudentProfileViewSet(viewsets.ModelViewSet):
         else:
             serializer.save()
 
+
+
     @action(
         detail=True,
         methods=["post"],
@@ -84,6 +86,66 @@ class StudentProfileViewSet(viewsets.ModelViewSet):
             "student_profile_id": str(student.id),
             "user_id": str(student.user.id),
             "mcq_access": student.mcq_access,
+        })
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="set-step",
+        permission_classes=[IsAuthenticated],
+    )
+    def set_step(self, request, pk=None):
+        user = request.user
+
+        # Only admins, counselors, and superusers can change
+        # a student's application step.
+        if not (
+            user.is_superuser
+            or getattr(user, "role", None) in (
+                "admin",
+                "counselor",
+            )
+        ):
+            return Response(
+                {
+                    "detail": "Only admins and counselors can update application steps."
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        student = self.get_object()
+
+        try:
+            step = int(request.data.get("current_step"))
+        except (TypeError, ValueError):
+            return Response(
+                {
+                    "detail": "current_step must be a number from 1 to 10."
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if step < 1 or step > 10:
+            return Response(
+                {
+                    "detail": "current_step must be between 1 and 10."
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        student.current_step = step
+        student.save(
+            update_fields=[
+                "current_step",
+                "updated_at",
+            ]
+        )
+
+        return Response({
+            "detail": "Application step updated successfully.",
+            "student_profile_id": str(student.id),
+            "user_id": str(student.user.id),
+            "current_step": student.current_step,
         })
 
     @action(
