@@ -40,8 +40,8 @@ class RegisterSerializer(serializers.ModelSerializer):
             StudentProfile.objects.get_or_create(
                 user=user,
                 defaults={
-                    "mcq_access": True,
-                    "book_access": True,
+                    "mcq_access": False,
+                    "book_access": False,
                 },
             )
 
