@@ -1,6 +1,7 @@
 from rest_framework import serializers
-from .models import StudentProcess
+
 from .models import StudentProfile, Education, Preferences
+from process.models import ProcessStage
 
 
 class EducationSerializer(serializers.ModelSerializer):
@@ -56,7 +57,11 @@ class StudentProfileSerializer(serializers.ModelSerializer):
 
     def get_current_process_step(self, obj):
         try:
+            if obj.process.current_stage is None:
+                return 1
+
             return obj.process.current_stage.order
+
         except Exception:
             return 1
 
@@ -83,12 +88,6 @@ class StudentProfileSerializer(serializers.ModelSerializer):
 
             if process.current_stage is None:
                 return True
-
-            from .models import StudentProcess
-
-            # If there is no stage after the current stage,
-            # the current stage is the final stage.
-            from process.models import ProcessStage
 
             has_next_stage = ProcessStage.objects.filter(
                 order__gt=process.current_stage.order
