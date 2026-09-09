@@ -6,8 +6,8 @@ from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from notifications.services import create_notification
 from notifications.models import Notification
+from notifications.services import create_notification
 
 from .models import (
     ProcessStage,
@@ -24,21 +24,21 @@ from .serializers import (
 class ProcessStageViewSet(viewsets.ModelViewSet):
     queryset = ProcessStage.objects.all()
     serializer_class = ProcessStageSerializer
+    permission_classes = [IsAuthenticated]
 
 
 class StudentProcessViewSet(viewsets.ModelViewSet):
-    queryset = StudentProcess.objects.select_related(
-        "student",
-        "student__user",
-        "current_stage",
-    ).all()
-
+    queryset = (
+        StudentProcess.objects
+        .select_related(
+            "student",
+            "student__user",
+            "current_stage",
+        )
+        .prefetch_related("stage_history")
+    )
     serializer_class = StudentProcessSerializer
-
-    filterset_fields = [
-        "student",
-        "current_stage",
-    ]
+    permission_classes = [IsAuthenticated]
 
     # =========================================================
     # COMPLETE CURRENT STAGE
@@ -53,31 +53,64 @@ class StudentProcessViewSet(viewsets.ModelViewSet):
     def complete_stage(self, request, pk=None):
         user = request.user
 
-        if not (
+        # -----------------------------------------------------
+        # ROLE CHECK
+        # -----------------------------------------------------
+
+        is_staff_process_user = (
             user.is_superuser
-            or getattr(user, "role", None) in ["admin", "counselor"]
-        ):
+            or getattr(user, "role", None) in [
+                "admin",
+                "counselor",
+            ]
+        )
+
+        is_student = (
+            getattr(user, "role", None) == "student"
+        )
+
+        # Only admin, counselor, superuser and student
+        # are allowed to complete stages.
+        if not is_staff_process_user and not is_student:
             return Response(
                 {
                     "detail": (
-                        "Only admins and counselors can "
+                        "You do not have permission to "
                         "complete process stages."
                     )
                 },
                 status=status.HTTP_403_FORBIDDEN,
             )
 
+        # -----------------------------------------------------
+        # LOCK PROCESS
+        # -----------------------------------------------------
+
         with transaction.atomic():
 
-            process = (
-                StudentProcess.objects
-                .select_for_update()
-                .select_related(
-                    "current_stage",
-                    "student__user",
+            try:
+                process = (
+                    StudentProcess.objects
+                    .select_for_update()
+                    .select_related(
+                        "student",
+                        "student__user",
+                        "current_stage",
+                    )
+                    .get(pk=pk)
                 )
-                .get(pk=pk)
-            )
+
+            except StudentProcess.DoesNotExist:
+                return Response(
+                    {
+                        "detail": "Student process not found."
+                    },
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+
+            # -------------------------------------------------
+            # CURRENT STAGE CHECK
+            # -------------------------------------------------
 
             if process.current_stage is None:
                 return Response(
@@ -90,89 +123,122 @@ class StudentProcessViewSet(viewsets.ModelViewSet):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
-            previous_stage = process.current_stage
+            current_stage = process.current_stage
+            current_order = current_stage.order
 
-            # The student who owns this process
-            student_user = process.student.user
+            # -------------------------------------------------
+            # STUDENT SECURITY
+            # -------------------------------------------------
 
-            # Complete current stage and move to next
+            if is_student:
+
+                # Student can only complete their own process.
+                if process.student.user_id != user.id:
+                    return Response(
+                        {
+                            "detail": (
+                                "You cannot complete another "
+                                "student's process."
+                            )
+                        },
+                        status=status.HTTP_403_FORBIDDEN,
+                    )
+
+                # Student can only complete Steps 1-3.
+                if current_order > 3:
+                    return Response(
+                        {
+                            "detail": (
+                                "Students can only complete "
+                                "Steps 1–3."
+                            )
+                        },
+                        status=status.HTTP_403_FORBIDDEN,
+                    )
+
+            # -------------------------------------------------
+            # COMPLETE CURRENT STAGE
+            # -------------------------------------------------
+
             result = process.complete_current_stage(
                 updated_by=user,
             )
 
-            process.refresh_from_db()
+            previous_stage = result["previous_stage"]
+            next_stage = result["current_stage"]
+            finished = result["finished"]
 
-            serializer = self.get_serializer(process)
+            # -------------------------------------------------
+            # STUDENT USER
+            # -------------------------------------------------
 
-        # =====================================================
-        # NOTIFICATION
-        # =====================================================
+            student_user = process.student.user
 
-        if result["finished"]:
+            # -------------------------------------------------
+            # NOTIFICATION
+            # -------------------------------------------------
 
-            create_notification(
-                user=student_user,
-                title="Application Process Completed",
-                message=(
-                    "Congratulations! You have completed all "
-                    "steps of your application process."
-                ),
-                notification_type=Notification.Type.SUCCESS,
-            )
+            if finished:
 
-            message = (
-                f"Stage '{previous_stage.name}' completed. "
-                "All process stages are now completed."
-            )
+                create_notification(
+                    user=student_user,
+                    title="Application Process Completed",
+                    message=(
+                        "Congratulations! Your application "
+                        "process has been completed."
+                    ),
+                    notification_type=(
+                        Notification.Type.SUCCESS
+                    ),
+                )
 
-        else:
+            else:
 
-            create_notification(
-                user=student_user,
-                title=f"Step {previous_stage.order} Completed",
-                message=(
-                    f"Your application has completed "
-                    f"Step {previous_stage.order}: "
-                    f"{previous_stage.name}. "
-                    f"You have now moved to Step "
-                    f"{process.current_stage.order}: "
-                    f"{process.current_stage.name}."
-                ),
-                notification_type=Notification.Type.INFO,
-            )
+                create_notification(
+                    user=student_user,
+                    title=(
+                        f"Step {previous_stage.order} "
+                        f"Completed"
+                    ),
+                    message=(
+                        f"Step {previous_stage.order}: "
+                        f"{previous_stage.name} has been "
+                        f"completed. Your next step is "
+                        f"Step {next_stage.order}: "
+                        f"{next_stage.name}."
+                    ),
+                    notification_type=(
+                        Notification.Type.INFO
+                    ),
+                )
 
-            message = (
-                f"Stage '{previous_stage.name}' completed. "
-                f"Student moved to "
-                f"'{process.current_stage.name}'."
-            )
+            # -------------------------------------------------
+            # RESPONSE
+            # -------------------------------------------------
 
-        return Response(
-            {
-                "detail": message,
-                "completed": True,
-                "finished": result["finished"],
-                "previous_stage": {
-                    "id": previous_stage.id,
-                    "name": previous_stage.name,
-                    "order": previous_stage.order,
+            return Response(
+                {
+                    "detail": (
+                        f"Step {previous_stage.order} "
+                        f"completed successfully."
+                    ),
+                    "previous_stage": {
+                        "id": previous_stage.id,
+                        "name": previous_stage.name,
+                        "order": previous_stage.order,
+                    },
+                    "current_stage": {
+                        "id": next_stage.id,
+                        "name": next_stage.name,
+                        "order": next_stage.order,
+                    },
+                    "finished": finished,
                 },
-                "current_stage": (
-                    None
-                    if result["finished"]
-                    else {
-                        "id": process.current_stage.id,
-                        "name": process.current_stage.name,
-                        "order": process.current_stage.order,
-                    }
-                ),
-                "student_process": serializer.data,
-            },
-            status=status.HTTP_200_OK,
-        )
+                status=status.HTTP_200_OK,
+            )
 
     # =========================================================
-    # MANUALLY SET STAGE
+    # SET STAGE
     # =========================================================
 
     @action(
@@ -184,9 +250,14 @@ class StudentProcessViewSet(viewsets.ModelViewSet):
     def set_stage(self, request, pk=None):
         user = request.user
 
+        # -----------------------------------------------------
+        # ONLY ADMIN / COUNSELOR / SUPERUSER
+        # -----------------------------------------------------
+
         if not (
             user.is_superuser
-            or getattr(user, "role", None) in ["admin", "counselor"]
+            or getattr(user, "role", None)
+            in ["admin", "counselor"]
         ):
             return Response(
                 {
@@ -198,77 +269,148 @@ class StudentProcessViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
+        # -----------------------------------------------------
+        # VALIDATE STAGE ORDER
+        # -----------------------------------------------------
+
         stage_order = request.data.get("stage_order")
 
         if stage_order is None:
             return Response(
-                {"detail": "stage_order is required."},
+                {
+                    "detail": "stage_order is required."
+                },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
         try:
             stage_order = int(stage_order)
+
         except (TypeError, ValueError):
             return Response(
-                {"detail": "stage_order must be an integer."},
+                {
+                    "detail": (
+                        "stage_order must be an integer."
+                    )
+                },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        # -----------------------------------------------------
+        # LOCK PROCESS
+        # -----------------------------------------------------
+
         with transaction.atomic():
 
-            process = (
-                StudentProcess.objects
-                .select_for_update()
-                .select_related(
-                    "current_stage",
-                    "student__user",
+            try:
+                process = (
+                    StudentProcess.objects
+                    .select_for_update()
+                    .select_related(
+                        "student",
+                        "student__user",
+                        "current_stage",
+                    )
+                    .get(pk=pk)
                 )
-                .get(pk=pk)
-            )
 
-            stage = ProcessStage.objects.filter(
-                order=stage_order
-            ).first()
+            except StudentProcess.DoesNotExist:
+                return Response(
+                    {
+                        "detail": "Student process not found."
+                    },
+                    status=status.HTTP_404_NOT_FOUND,
+                )
 
-            if stage is None:
+            # -------------------------------------------------
+            # FIND TARGET STAGE
+            # -------------------------------------------------
+
+            try:
+                target_stage = ProcessStage.objects.get(
+                    order=stage_order
+                )
+
+            except ProcessStage.DoesNotExist:
                 return Response(
                     {
                         "detail": (
-                            f"Process stage {stage_order} "
-                            "does not exist."
+                            f"Process Stage {stage_order} "
+                            f"does not exist."
                         )
                     },
                     status=status.HTTP_404_NOT_FOUND,
                 )
 
+            # -------------------------------------------------
+            # CURRENT STAGE
+            # -------------------------------------------------
+
             previous_stage = process.current_stage
 
-            # Student who owns this process
-            student_user = process.student.user
+            # Already on requested stage.
+            if (
+                previous_stage is not None
+                and previous_stage.id == target_stage.id
+            ):
+                return Response(
+                    {
+                        "detail": (
+                            f"Student is already on "
+                            f"Step {target_stage.order}."
+                        ),
+                        "current_stage": {
+                            "id": target_stage.id,
+                            "name": target_stage.name,
+                            "order": target_stage.order,
+                        },
+                    },
+                    status=status.HTTP_200_OK,
+                )
 
             # -------------------------------------------------
-            # If there was a previous stage, mark it completed
+            # MARK PREVIOUS STAGE COMPLETED
             # -------------------------------------------------
 
             if previous_stage is not None:
 
-                ProcessStageHistory.objects.update_or_create(
-                    student_process=process,
-                    stage=previous_stage,
-                    defaults={
-                        "status": (
-                            ProcessStageHistory.Status.COMPLETED
-                        ),
-                        "completed_at": timezone.now(),
-                        "updated_by": user,
-                    },
+                previous_history, _ = (
+                    ProcessStageHistory.objects.get_or_create(
+                        student_process=process,
+                        stage=previous_stage,
+                        defaults={
+                            "status": (
+                                ProcessStageHistory
+                                .Status.IN_PROGRESS
+                            )
+                        },
+                    )
+                )
+
+                previous_history.status = (
+                    ProcessStageHistory
+                    .Status.COMPLETED
+                )
+
+                previous_history.completed_at = (
+                    timezone.now()
+                )
+
+                previous_history.updated_by = user
+
+                previous_history.save(
+                    update_fields=[
+                        "status",
+                        "completed_at",
+                        "updated_by",
+                    ]
                 )
 
             # -------------------------------------------------
-            # Change current stage
+            # MOVE TO TARGET STAGE
             # -------------------------------------------------
 
-            process.current_stage = stage
+            process.current_stage = target_stage
 
             process.save(
                 update_fields=[
@@ -278,76 +420,84 @@ class StudentProcessViewSet(viewsets.ModelViewSet):
             )
 
             # -------------------------------------------------
-            # New stage becomes IN PROGRESS
+            # CREATE / UPDATE TARGET HISTORY
             # -------------------------------------------------
 
             ProcessStageHistory.objects.update_or_create(
                 student_process=process,
-                stage=stage,
+                stage=target_stage,
                 defaults={
                     "status": (
-                        ProcessStageHistory.Status.IN_PROGRESS
+                        ProcessStageHistory
+                        .Status.IN_PROGRESS
                     ),
                     "updated_by": user,
-                    "completed_at": None,
                 },
             )
 
-            process.refresh_from_db()
+            # -------------------------------------------------
+            # STUDENT USER
+            # -------------------------------------------------
 
-            serializer = self.get_serializer(process)
+            student_user = process.student.user
 
-        # =====================================================
-        # NOTIFICATION
-        # =====================================================
+            # -------------------------------------------------
+            # NOTIFICATION
+            # -------------------------------------------------
 
-        create_notification(
-            user=student_user,
-            title="Application Step Updated",
-            message=(
-                f"Your application has been moved to "
-                f"Step {stage.order}: {stage.name}."
-            ),
-            notification_type=Notification.Type.INFO,
-        )
-
-        return Response(
-            {
-                "detail": (
-                    f"Student moved to '{stage.name}' "
-                    f"(Step {stage.order})."
+            create_notification(
+                user=student_user,
+                title="Application Step Updated",
+                message=(
+                    f"Your application has been moved "
+                    f"to Step {target_stage.order}: "
+                    f"{target_stage.name}."
                 ),
-                "previous_stage": (
-                    None
-                    if previous_stage is None
-                    else {
-                        "id": previous_stage.id,
-                        "name": previous_stage.name,
-                        "order": previous_stage.order,
-                    }
+                notification_type=(
+                    Notification.Type.INFO
                 ),
-                "current_stage": {
-                    "id": stage.id,
-                    "name": stage.name,
-                    "order": stage.order,
+            )
+
+            # -------------------------------------------------
+            # RESPONSE
+            # -------------------------------------------------
+
+            return Response(
+                {
+                    "detail": (
+                        f"Application moved to "
+                        f"Step {target_stage.order}."
+                    ),
+                    "previous_stage": (
+                        {
+                            "id": previous_stage.id,
+                            "name": previous_stage.name,
+                            "order": previous_stage.order,
+                        }
+                        if previous_stage
+                        else None
+                    ),
+                    "current_stage": {
+                        "id": target_stage.id,
+                        "name": target_stage.name,
+                        "order": target_stage.order,
+                    },
+                    "finished": False,
                 },
-                "student_process": serializer.data,
-            },
-            status=status.HTTP_200_OK,
-        )
+                status=status.HTTP_200_OK,
+            )
 
 
 class ProcessStageHistoryViewSet(viewsets.ModelViewSet):
-    queryset = ProcessStageHistory.objects.select_related(
-        "student_process",
-        "stage",
-        "updated_by",
-    ).all()
-
+    queryset = (
+        ProcessStageHistory.objects
+        .select_related(
+            "student_process",
+            "student_process__student",
+            "student_process__student__user",
+            "stage",
+            "updated_by",
+        )
+    )
     serializer_class = ProcessStageHistorySerializer
-
-    filterset_fields = [
-        "student_process",
-        "stage",
-        "status",
-    ]
+    permission_classes = [IsAuthenticated]
