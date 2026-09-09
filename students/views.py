@@ -3,13 +3,22 @@ from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from .models import StudentProfile, Education, Preferences
+from .models import (
+    StudentProfile,
+    Education,
+    Preferences,
+    StudentApplication,
+)
 from .serializers import (
     StudentProfileSerializer,
     EducationSerializer,
     PreferencesSerializer,
+    StudentApplicationSerializer,
 )
 
+# ============================================================
+# STUDENT APPLICATION
+# ============================================================
 
 # ============================================================
 # STUDENT PROFILE
@@ -202,6 +211,69 @@ class StudentProfileViewSet(viewsets.ModelViewSet):
         return Response(
         StudentProfileSerializer(profile).data
     )
+
+    # ============================================================
+# STUDENT APPLICATION
+# ============================================================
+
+class StudentApplicationViewSet(viewsets.ModelViewSet):
+
+    queryset = StudentApplication.objects.select_related(
+        "student",
+        "student__user",
+    ).all()
+
+    serializer_class = StudentApplicationSerializer
+
+    permission_classes = [
+        IsAuthenticated,
+    ]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        user = self.request.user
+
+        if user.is_superuser or getattr(user, "role", None) in (
+            "admin",
+            "counselor",
+        ):
+            return qs
+
+        return qs.filter(
+            student__user=user
+        )
+
+    @action(
+        detail=False,
+        methods=["get"],
+        url_path="me",
+        permission_classes=[IsAuthenticated],
+    )
+    def me(self, request):
+
+        try:
+            profile = StudentProfile.objects.get(
+                user=request.user
+            )
+        except StudentProfile.DoesNotExist:
+            return Response(
+                {
+                    "detail": "Student profile does not exist."
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        application, _ = (
+            StudentApplication.objects.get_or_create(
+                student=profile
+            )
+        )
+
+        return Response(
+            StudentApplicationSerializer(
+                application
+            ).data
+        )
 
 # ============================================================
 # EDUCATION

@@ -129,14 +129,9 @@ if os.environ.get("DATABASE_URL"):
     }
 else:
     DATABASES = {
-        "default": {
-            "ENGINE": "django.db.backends.postgresql",
-            "NAME": "backend_db",
-            "USER": "django_user",
-            "PASSWORD": "YOUR_LOCAL_PASSWORD",
-            "HOST": "127.0.0.1",
-            "PORT": "5432",
-        }
+         "default": dj_database_url.parse(
+        os.environ["DATABASE_URL"]
+        )
     }
 
 REST_FRAMEWORK = {

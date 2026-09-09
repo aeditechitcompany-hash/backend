@@ -1,6 +1,10 @@
 from django.contrib import admin
-from .models import StudentProfile, Education, Preferences
-
+from .models import (
+    StudentProfile,
+    Education,
+    Preferences,
+    StudentApplication,
+)
 
 class EducationInline(admin.TabularInline):
     model = Education

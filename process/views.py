@@ -1,8 +1,11 @@
 from django.db import transaction
+from django.utils import timezone
+
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+
 from notifications.services import create_notification
 from notifications.models import Notification
 
@@ -37,6 +40,10 @@ class StudentProcessViewSet(viewsets.ModelViewSet):
         "current_stage",
     ]
 
+    # =========================================================
+    # COMPLETE CURRENT STAGE
+    # =========================================================
+
     @action(
         detail=True,
         methods=["post"],
@@ -46,7 +53,6 @@ class StudentProcessViewSet(viewsets.ModelViewSet):
     def complete_stage(self, request, pk=None):
         user = request.user
 
-        # Only admin/counselor/superuser can process a stage.
         if not (
             user.is_superuser
             or getattr(user, "role", None) in ["admin", "counselor"]
@@ -62,6 +68,7 @@ class StudentProcessViewSet(viewsets.ModelViewSet):
             )
 
         with transaction.atomic():
+
             process = (
                 StudentProcess.objects
                 .select_for_update()
@@ -85,6 +92,10 @@ class StudentProcessViewSet(viewsets.ModelViewSet):
 
             previous_stage = process.current_stage
 
+            # The student who owns this process
+            student_user = process.student.user
+
+            # Complete current stage and move to next
             result = process.complete_current_stage(
                 updated_by=user,
             )
@@ -93,7 +104,12 @@ class StudentProcessViewSet(viewsets.ModelViewSet):
 
             serializer = self.get_serializer(process)
 
+        # =====================================================
+        # NOTIFICATION
+        # =====================================================
+
         if result["finished"]:
+
             create_notification(
                 user=student_user,
                 title="Application Process Completed",
@@ -103,7 +119,14 @@ class StudentProcessViewSet(viewsets.ModelViewSet):
                 ),
                 notification_type=Notification.Type.SUCCESS,
             )
+
+            message = (
+                f"Stage '{previous_stage.name}' completed. "
+                "All process stages are now completed."
+            )
+
         else:
+
             create_notification(
                 user=student_user,
                 title=f"Step {previous_stage.order} Completed",
@@ -117,17 +140,7 @@ class StudentProcessViewSet(viewsets.ModelViewSet):
                 ),
                 notification_type=Notification.Type.INFO,
             )
-            message = (
-                f"Stage '{previous_stage.name}' completed. "
-                "All process stages are now completed."
-            )
 
-        if result["finished"]:
-            message = (
-                f"Stage '{previous_stage.name}' completed. "
-                "All process stages are now completed."
-            )
-        else:
             message = (
                 f"Stage '{previous_stage.name}' completed. "
                 f"Student moved to "
@@ -158,6 +171,10 @@ class StudentProcessViewSet(viewsets.ModelViewSet):
             status=status.HTTP_200_OK,
         )
 
+    # =========================================================
+    # MANUALLY SET STAGE
+    # =========================================================
+
     @action(
         detail=True,
         methods=["post"],
@@ -167,7 +184,6 @@ class StudentProcessViewSet(viewsets.ModelViewSet):
     def set_stage(self, request, pk=None):
         user = request.user
 
-        # Only admin/counselor/superuser can manually change a stage.
         if not (
             user.is_superuser
             or getattr(user, "role", None) in ["admin", "counselor"]
@@ -186,9 +202,7 @@ class StudentProcessViewSet(viewsets.ModelViewSet):
 
         if stage_order is None:
             return Response(
-                {
-                    "detail": "stage_order is required."
-                },
+                {"detail": "stage_order is required."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -196,13 +210,12 @@ class StudentProcessViewSet(viewsets.ModelViewSet):
             stage_order = int(stage_order)
         except (TypeError, ValueError):
             return Response(
-                {
-                    "detail": "stage_order must be an integer."
-                },
+                {"detail": "stage_order must be an integer."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
         with transaction.atomic():
+
             process = (
                 StudentProcess.objects
                 .select_for_update()
@@ -213,18 +226,16 @@ class StudentProcessViewSet(viewsets.ModelViewSet):
                 .get(pk=pk)
             )
 
-            stage = (
-                ProcessStage.objects
-                .filter(order=stage_order)
-                .first()
-            )
+            stage = ProcessStage.objects.filter(
+                order=stage_order
+            ).first()
 
             if stage is None:
                 return Response(
                     {
                         "detail": (
-                            f"Process stage with order "
-                            f"{stage_order} does not exist."
+                            f"Process stage {stage_order} "
+                            "does not exist."
                         )
                     },
                     status=status.HTTP_404_NOT_FOUND,
@@ -232,29 +243,51 @@ class StudentProcessViewSet(viewsets.ModelViewSet):
 
             previous_stage = process.current_stage
 
+            # Student who owns this process
+            student_user = process.student.user
+
+            # -------------------------------------------------
+            # If there was a previous stage, mark it completed
+            # -------------------------------------------------
+
+            if previous_stage is not None:
+
+                ProcessStageHistory.objects.update_or_create(
+                    student_process=process,
+                    stage=previous_stage,
+                    defaults={
+                        "status": (
+                            ProcessStageHistory.Status.COMPLETED
+                        ),
+                        "completed_at": timezone.now(),
+                        "updated_by": user,
+                    },
+                )
+
+            # -------------------------------------------------
+            # Change current stage
+            # -------------------------------------------------
+
             process.current_stage = stage
+
             process.save(
                 update_fields=[
                     "current_stage",
                     "updated_at",
                 ]
             )
-            create_notification(
-                user=process.student.user,
-                title="Application Step Updated",
-                message=(
-                    f"Your application has been moved to "
-                    f"Step {stage.order}: {stage.name}."
-                ),
-                notification_type=Notification.Type.INFO,
-            )
 
-            # Mark the selected stage as the active/in-progress stage.
+            # -------------------------------------------------
+            # New stage becomes IN PROGRESS
+            # -------------------------------------------------
+
             ProcessStageHistory.objects.update_or_create(
                 student_process=process,
                 stage=stage,
                 defaults={
-                    "status": ProcessStageHistory.Status.IN_PROGRESS,
+                    "status": (
+                        ProcessStageHistory.Status.IN_PROGRESS
+                    ),
                     "updated_by": user,
                     "completed_at": None,
                 },
@@ -264,11 +297,25 @@ class StudentProcessViewSet(viewsets.ModelViewSet):
 
             serializer = self.get_serializer(process)
 
+        # =====================================================
+        # NOTIFICATION
+        # =====================================================
+
+        create_notification(
+            user=student_user,
+            title="Application Step Updated",
+            message=(
+                f"Your application has been moved to "
+                f"Step {stage.order}: {stage.name}."
+            ),
+            notification_type=Notification.Type.INFO,
+        )
+
         return Response(
             {
                 "detail": (
-                    f"Student moved to "
-                    f"'{stage.name}' (Step {stage.order})."
+                    f"Student moved to '{stage.name}' "
+                    f"(Step {stage.order})."
                 ),
                 "previous_stage": (
                     None

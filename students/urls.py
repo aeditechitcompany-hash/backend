@@ -4,6 +4,7 @@ from .views import (
     StudentProfileViewSet,
     EducationViewSet,
     PreferencesViewSet,
+    StudentApplicationViewSet,
 )
 
 
@@ -13,6 +14,12 @@ router.register(
     r"profiles",
     StudentProfileViewSet,
     basename="student-profile",
+)
+
+router.register(
+    r"applications",
+    StudentApplicationViewSet,
+    basename="student-application",
 )
 
 router.register(
@@ -26,6 +33,8 @@ router.register(
     PreferencesViewSet,
     basename="preferences",
 )
+
+
 
 
 urlpatterns = router.urls
