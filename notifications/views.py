@@ -11,19 +11,22 @@ class NotificationTemplateViewSet(viewsets.ModelViewSet):
 
 
 class NotificationViewSet(viewsets.ModelViewSet):
-    queryset = Notification.objects.all()
     serializer_class = NotificationSerializer
-    filterset_fields = ["user", "notification_type", "is_read"]
+
+    filterset_fields = ["notification_type", "is_read"]
 
     def get_queryset(self):
-        qs = super().get_queryset()
-        if self.request.query_params.get("mine") == "true":
-            qs = qs.filter(user=self.request.user)
-        return qs
+        return Notification.objects.filter(
+            user=self.request.user
+        ).order_by("-created_at")
 
     @action(detail=True, methods=["post"])
     def mark_read(self, request, pk=None):
         notification = self.get_object()
+
         notification.is_read = True
         notification.save(update_fields=["is_read"])
-        return Response(NotificationSerializer(notification).data)
+
+        return Response(
+            NotificationSerializer(notification).data
+        )
