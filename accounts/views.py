@@ -1,4 +1,20 @@
+import secrets
+
+from datetime import timedelta
+
+from django.core.mail import send_mail
+from django.conf import settings
 from django.utils import timezone
+from .models import (
+    User,
+    OTP,
+    LoginHistory,
+    PasswordResetToken,
+    Role,
+    FeaturePermission,
+    UserRole,
+)
+
 from rest_framework import viewsets, generics, status, permissions
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -7,9 +23,19 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from .models import User, OTP, LoginHistory, Role, FeaturePermission, UserRole
 from .permissions import IsAdmin, IsCounselor
 from .serializers import (
-    UserSerializer, RegisterSerializer, LoginSerializer, OTPRequestSerializer,
-    OTPVerifySerializer, LoginHistorySerializer, RoleSerializer,
-    FeaturePermissionSerializer, UserRoleSerializer,
+    UserSerializer,
+    RegisterSerializer,
+    LoginSerializer,
+    OTPRequestSerializer,
+    OTPVerifySerializer,
+    LoginHistorySerializer,
+    RoleSerializer,
+    FeaturePermissionSerializer,
+    UserRoleSerializer,
+    PasswordForgotSerializer,
+    PasswordVerifyOTPSerializer,
+    PasswordResetSerializer,
+    ChangePasswordSerializer,
 )
 import logging
 
@@ -178,3 +204,205 @@ class UserRoleViewSet(viewsets.ModelViewSet):
     serializer_class = UserRoleSerializer
     filterset_fields = ["user", "role"]
     permission_classes = [IsAdmin]
+
+class PasswordForgotView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        serializer = PasswordForgotSerializer(
+            data=request.data
+        )
+
+        serializer.is_valid(raise_exception=True)
+
+        email = serializer.validated_data["email"].strip().lower()
+
+        try:
+            user = User.objects.get(
+                email=email,
+                is_active=True,
+            )
+        except User.DoesNotExist:
+            # Don't reveal whether the email exists.
+            return Response(
+                {
+                    "detail":
+                        "If an account exists for this email, "
+                        "a password reset OTP has been sent."
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        # Invalidate previous password reset OTPs.
+        OTP.objects.filter(
+            user=user,
+            purpose=OTP.Purpose.PASSWORD_RESET,
+            is_used=False,
+        ).update(
+            is_used=True,
+        )
+
+        # Create new OTP.
+        otp = OTP.objects.create(
+            user=user,
+            purpose=OTP.Purpose.PASSWORD_RESET,
+        )
+
+        send_mail(
+            subject="Nibangsh Consultancy - Password Reset OTP",
+
+            message=(
+                "Nibangsh Consultancy\n\n"
+                "Password Reset OTP\n\n"
+                f"Your verification code is: {otp.code}\n\n"
+                "This code expires in 10 minutes.\n\n"
+                "If you did not request a password reset, "
+                "you can safely ignore this email."
+            ),
+
+            from_email=settings.DEFAULT_FROM_EMAIL,
+
+            recipient_list=[user.email],
+
+            fail_silently=False,
+        )
+
+        return Response(
+            {
+                "detail":
+                    "If an account exists for this email, "
+                    "a password reset OTP has been sent."
+            },
+            status=status.HTTP_200_OK,
+        )
+
+class PasswordVerifyOTPView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        serializer = PasswordVerifyOTPSerializer(
+            data=request.data
+        )
+
+        serializer.is_valid(raise_exception=True)
+
+        user = serializer.validated_data["user"]
+        otp = serializer.validated_data["otp"]
+
+        # Mark OTP as used.
+        otp.is_used = True
+        otp.save(update_fields=["is_used"])
+
+        # Invalidate previous reset tokens.
+        PasswordResetToken.objects.filter(
+            user=user,
+            is_used=False,
+        ).update(
+            is_used=True,
+        )
+
+        # Create secure reset token.
+        token = secrets.token_urlsafe(48)
+
+        reset_token = PasswordResetToken.objects.create(
+            user=user,
+            token=token,
+            expires_at=timezone.now() + timedelta(minutes=10),
+        )
+
+        return Response(
+            {
+                "detail": "OTP verified successfully.",
+                "reset_token": token,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+class PasswordResetView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        serializer = PasswordResetSerializer(
+            data=request.data
+        )
+
+        serializer.is_valid(raise_exception=True)
+
+        reset_token = serializer.validated_data[
+            "reset_token"
+        ]
+
+        new_password = serializer.validated_data[
+            "new_password"
+        ]
+
+        user = reset_token.user
+
+        user.set_password(new_password)
+        user.save(update_fields=["password"])
+
+        # Token can only be used once.
+        reset_token.is_used = True
+        reset_token.save(
+            update_fields=["is_used"]
+        )
+
+        # Invalidate remaining password reset OTPs.
+        OTP.objects.filter(
+            user=user,
+            purpose=OTP.Purpose.PASSWORD_RESET,
+            is_used=False,
+        ).update(
+            is_used=True,
+        )
+
+        # Invalidate any other reset tokens.
+        PasswordResetToken.objects.filter(
+            user=user,
+            is_used=False,
+        ).exclude(
+            id=reset_token.id
+        ).update(
+            is_used=True,
+        )
+
+        return Response(
+            {
+                "detail":
+                    "Password has been reset successfully."
+            },
+            status=status.HTTP_200_OK,
+        )
+
+class ChangePasswordView(APIView):
+    permission_classes = [
+        permissions.IsAuthenticated
+    ]
+
+    def post(self, request):
+        serializer = ChangePasswordSerializer(
+            data=request.data,
+            context={
+                "request": request,
+            },
+        )
+
+        serializer.is_valid(raise_exception=True)
+
+        user = request.user
+
+        user.set_password(
+            serializer.validated_data["new_password"]
+        )
+
+        user.save(
+            update_fields=["password"]
+        )
+
+        return Response(
+            {
+                "detail":
+                    "Password changed successfully."
+            },
+            status=status.HTTP_200_OK,
+        )

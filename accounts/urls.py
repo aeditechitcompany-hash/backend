@@ -3,9 +3,27 @@ from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView
 
 from .views import (
-    RegisterView, LoginView, StudentLoginView, CounselorLoginView, AdminLoginView,
-    RequestOTPView, VerifyOTPView, MeView,
-    UserViewSet, LoginHistoryViewSet, RoleViewSet, FeaturePermissionViewSet, UserRoleViewSet,
+    RegisterView,
+    LoginView,
+    StudentLoginView,
+    CounselorLoginView,
+    AdminLoginView,
+
+    RequestOTPView,
+    VerifyOTPView,
+
+    PasswordForgotView,
+    PasswordVerifyOTPView,
+    PasswordResetView,
+    ChangePasswordView,
+
+    MeView,
+
+    UserViewSet,
+    LoginHistoryViewSet,
+    RoleViewSet,
+    FeaturePermissionViewSet,
+    UserRoleViewSet,
 )
 
 router = DefaultRouter()
@@ -26,4 +44,27 @@ urlpatterns = [
     path("auth/otp/verify/", VerifyOTPView.as_view(), name="otp-verify"),
     path("auth/me/", MeView.as_view(), name="me"),
     path("", include(router.urls)),
+    path(
+        "password/forgot/",
+        PasswordForgotView.as_view(),
+        name="password-forgot",
+    ),
+
+    path(
+        "password/verify-otp/",
+        PasswordVerifyOTPView.as_view(),
+        name="password-verify-otp",
+    ),
+
+    path(
+        "password/reset/",
+        PasswordResetView.as_view(),
+        name="password-reset",
+    ),
+
+    path(
+        "password/change/",
+        ChangePasswordView.as_view(),
+        name="password-change",
+    ),
 ]

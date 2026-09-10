@@ -1,4 +1,4 @@
-import random
+import secrets
 from datetime import timedelta
 
 from django.conf import settings
@@ -25,7 +25,7 @@ class OTP(models.Model):
 
     def save(self, *args, **kwargs):
         if not self.code:
-            self.code = f"{random.randint(0, 999999):06d}"
+            self.code = f"{secrets.randbelow(1_000_000):06d}"
         if not self.expires_at:
             self.expires_at = timezone.now() + timedelta(minutes=10)
         super().save(*args, **kwargs)

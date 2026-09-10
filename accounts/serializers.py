@@ -1,3 +1,4 @@
+import re
 from django.contrib.auth import authenticate
 from django.utils import timezone
 from rest_framework import serializers
@@ -9,6 +10,7 @@ from .models import (
     User,
     OTP,
     LoginHistory,
+    PasswordResetToken,
     Role,
     FeaturePermission,
     UserRole,
@@ -348,3 +350,187 @@ class UserRoleSerializer(serializers.ModelSerializer):
     class Meta:
         model = UserRole
         fields = "__all__"
+
+class PasswordForgotSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+
+
+class PasswordVerifyOTPSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+
+    code = serializers.CharField(
+        min_length=6,
+        max_length=6,
+    )
+
+    def validate(self, attrs):
+        email = attrs["email"].strip().lower()
+        code = attrs["code"].strip()
+
+        try:
+            user = User.objects.get(email=email)
+        except User.DoesNotExist:
+            raise serializers.ValidationError(
+                "Invalid email or OTP."
+            )
+
+        otp = (
+            OTP.objects
+            .filter(
+                user=user,
+                purpose=OTP.Purpose.PASSWORD_RESET,
+                code=code,
+                is_used=False,
+            )
+            .order_by("-created_at")
+            .first()
+        )
+
+        if not otp or not otp.is_valid():
+            raise serializers.ValidationError(
+                "Invalid or expired OTP."
+            )
+
+        attrs["user"] = user
+        attrs["otp"] = otp
+
+        return attrs
+
+
+class PasswordResetSerializer(serializers.Serializer):
+    token = serializers.CharField()
+
+    new_password = serializers.CharField(
+        write_only=True,
+        min_length=8,
+    )
+
+    confirm_password = serializers.CharField(
+        write_only=True,
+        min_length=8,
+    )
+
+    def validate(self, attrs):
+        new_password = attrs["new_password"]
+        confirm_password = attrs["confirm_password"]
+
+        if new_password != confirm_password:
+            raise serializers.ValidationError(
+                {
+                    "confirm_password": "Passwords do not match."
+                }
+            )
+
+        if not re.search(r"[A-Z]", new_password):
+            raise serializers.ValidationError(
+                "Password must contain at least one uppercase letter."
+            )
+
+        if not re.search(r"[a-z]", new_password):
+            raise serializers.ValidationError(
+                "Password must contain at least one lowercase letter."
+            )
+
+        if not re.search(r"[0-9]", new_password):
+            raise serializers.ValidationError(
+                "Password must contain at least one number."
+            )
+
+        if not re.search(
+            r'[!@#$&*~%^()_\-+=\[\]{};:,.<>?/\\|`]',
+            new_password,
+        ):
+            raise serializers.ValidationError(
+                "Password must contain at least one special character."
+            )
+
+        try:
+            reset_token = PasswordResetToken.objects.get(
+                token=attrs["token"],
+                is_used=False,
+            )
+        except PasswordResetToken.DoesNotExist:
+            raise serializers.ValidationError(
+                "Invalid or expired reset token."
+            )
+
+        if timezone.now() > reset_token.expires_at:
+            raise serializers.ValidationError(
+                "Invalid or expired reset token."
+            )
+
+        attrs["reset_token"] = reset_token
+
+        return attrs
+
+
+class ChangePasswordSerializer(serializers.Serializer):
+    current_password = serializers.CharField(
+        write_only=True,
+    )
+
+    new_password = serializers.CharField(
+        write_only=True,
+        min_length=8,
+    )
+
+    confirm_password = serializers.CharField(
+        write_only=True,
+        min_length=8,
+    )
+
+    def validate(self, attrs):
+        user = self.context["request"].user
+
+        current_password = attrs["current_password"]
+        new_password = attrs["new_password"]
+        confirm_password = attrs["confirm_password"]
+
+        if not user.check_password(current_password):
+            raise serializers.ValidationError(
+                {
+                    "current_password":
+                        "Current password is incorrect."
+                }
+            )
+
+        if new_password != confirm_password:
+            raise serializers.ValidationError(
+                {
+                    "confirm_password":
+                        "Passwords do not match."
+                }
+            )
+
+        if current_password == new_password:
+            raise serializers.ValidationError(
+                {
+                    "new_password":
+                        "New password must be different from current password."
+                }
+            )
+
+        if not re.search(r"[A-Z]", new_password):
+            raise serializers.ValidationError(
+                "Password must contain at least one uppercase letter."
+            )
+
+        if not re.search(r"[a-z]", new_password):
+            raise serializers.ValidationError(
+                "Password must contain at least one lowercase letter."
+            )
+
+        if not re.search(r"[0-9]", new_password):
+            raise serializers.ValidationError(
+                "Password must contain at least one number."
+            )
+
+        if not re.search(
+            r'[!@#$&*~%^()_\-+=\[\]{};:,.<>?/\\|`]',
+            new_password,
+        ):
+            raise serializers.ValidationError(
+                "Password must contain at least one special character."
+            )
+
+        return attrs
