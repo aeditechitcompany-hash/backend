@@ -2,6 +2,11 @@ from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.parsers import (
+    MultiPartParser,
+    FormParser,
+    JSONParser,
+)
 
 from .models import (
     StudentProfile,
@@ -216,6 +221,10 @@ class StudentProfileViewSet(viewsets.ModelViewSet):
 # STUDENT APPLICATION
 # ============================================================
 
+# ============================================================
+# STUDENT APPLICATION
+# ============================================================
+
 class StudentApplicationViewSet(viewsets.ModelViewSet):
 
     queryset = StudentApplication.objects.select_related(
@@ -228,24 +237,31 @@ class StudentApplicationViewSet(viewsets.ModelViewSet):
     permission_classes = [
         IsAuthenticated,
     ]
+    parser_classes = [
+        MultiPartParser,
+        FormParser,
+        JSONParser,
+    ]
 
     def get_queryset(self):
         qs = super().get_queryset()
         user = self.request.user
 
+        # Admins and counselors can access all applications.
         if user.is_superuser or getattr(user, "role", None) in (
             "admin",
             "counselor",
         ):
             return qs
 
+        # Students can only access their own application.
         return qs.filter(
             student__user=user
         )
 
     @action(
         detail=False,
-        methods=["get"],
+        methods=["get", "patch"],
         url_path="me",
         permission_classes=[IsAuthenticated],
     )
@@ -269,10 +285,36 @@ class StudentApplicationViewSet(viewsets.ModelViewSet):
             )
         )
 
+        # ------------------------------------------------------
+        # PATCH
+        # ------------------------------------------------------
+
+        if request.method == "PATCH":
+
+            serializer = self.get_serializer(
+                application,
+                data=request.data,
+                partial=True,
+            )
+
+            serializer.is_valid(
+                raise_exception=True
+            )
+
+            serializer.save()
+
+            return Response(
+                serializer.data,
+                status=status.HTTP_200_OK,
+            )
+
+        # ------------------------------------------------------
+        # GET
+        # ------------------------------------------------------
+
         return Response(
-            StudentApplicationSerializer(
-                application
-            ).data
+            self.get_serializer(application).data,
+            status=status.HTTP_200_OK,
         )
 
 # ============================================================

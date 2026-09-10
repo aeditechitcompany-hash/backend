@@ -1,5 +1,7 @@
 from django.db import models
 
+from storage.supabase_student_storage import SupabaseStudentStorage
+
 
 class StudentApplication(models.Model):
     student = models.OneToOneField(
@@ -45,18 +47,22 @@ class StudentApplication(models.Model):
         null=True,
     )
 
-    confirmation_file_name = models.CharField(
-        max_length=255,
+    confirmation_file = models.FileField(
+        storage=SupabaseStudentStorage(),
+        upload_to="applications/step5/",
         blank=True,
+        null=True,
     )
 
     # ============================================================
     # STEP 6 — OFFER
     # ============================================================
 
-    offer_file_name = models.CharField(
-        max_length=255,
+    offer_file = models.FileField(
+        storage=SupabaseStudentStorage(),
+        upload_to="applications/step6/",
         blank=True,
+        null=True,
     )
 
     offer_type = models.CharField(
@@ -73,9 +79,11 @@ class StudentApplication(models.Model):
     # STEP 7 — LOC
     # ============================================================
 
-    loc_file_name = models.CharField(
-        max_length=255,
+    loc_file = models.FileField(
+        storage=SupabaseStudentStorage(),
+        upload_to="applications/step7/",
         blank=True,
+        null=True,
     )
 
     loc_verified = models.BooleanField(
@@ -118,9 +126,11 @@ class StudentApplication(models.Model):
         blank=True,
     )
 
-    visa_approval_letter_file_name = models.CharField(
-        max_length=255,
+    visa_approval_letter_file = models.FileField(
+        storage=SupabaseStudentStorage(),
+        upload_to="applications/step9/",
         blank=True,
+        null=True,
     )
 
     # ============================================================
@@ -152,9 +162,11 @@ class StudentApplication(models.Model):
         null=True,
     )
 
-    ticket_file_name = models.CharField(
-        max_length=255,
+    ticket_file = models.FileField(
+        storage=SupabaseStudentStorage(),
+        upload_to="applications/step10/",
         blank=True,
+        null=True,
     )
 
     # ============================================================

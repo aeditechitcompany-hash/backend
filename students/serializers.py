@@ -6,6 +6,7 @@ from .models import (
     Preferences,
     StudentApplication,
 )
+
 from process.models import ProcessStageHistory
 
 
@@ -23,7 +24,6 @@ class EducationSerializer(serializers.ModelSerializer):
     class Meta:
         model = Education
         fields = "__all__"
-        extra_fields = ["country_name"]
 
 
 class PreferencesSerializer(serializers.ModelSerializer):
@@ -31,9 +31,12 @@ class PreferencesSerializer(serializers.ModelSerializer):
         model = Preferences
         fields = "__all__"
 
+
 class StudentApplicationSerializer(serializers.ModelSerializer):
+
     class Meta:
         model = StudentApplication
+
         fields = "__all__"
 
         read_only_fields = [
@@ -43,13 +46,17 @@ class StudentApplicationSerializer(serializers.ModelSerializer):
             "updated_at",
         ]
 
+
 class StudentProfileSerializer(serializers.ModelSerializer):
+
+    # ============================================================
+    # RELATED DATA
+    # ============================================================
+
     education_history = EducationSerializer(
         many=True,
         read_only=True,
     )
-
-    application = serializers.SerializerMethodField()
 
     preferences = PreferencesSerializer(
         read_only=True,
@@ -59,9 +66,9 @@ class StudentProfileSerializer(serializers.ModelSerializer):
         read_only=True,
     )
 
-    # --------------------------------------------------------
+    # ============================================================
     # PROCESS INFORMATION
-    # --------------------------------------------------------
+    # ============================================================
 
     process_id = serializers.SerializerMethodField()
 
@@ -73,9 +80,9 @@ class StudentProfileSerializer(serializers.ModelSerializer):
 
     process_finished = serializers.SerializerMethodField()
 
-    # --------------------------------------------------------
+    # ============================================================
     # PROCESS ID
-    # --------------------------------------------------------
+    # ============================================================
 
     def get_process_id(self, obj):
         try:
@@ -83,9 +90,9 @@ class StudentProfileSerializer(serializers.ModelSerializer):
         except Exception:
             return None
 
-    # --------------------------------------------------------
+    # ============================================================
     # CURRENT PROCESS STEP
-    # --------------------------------------------------------
+    # ============================================================
 
     def get_current_process_step(self, obj):
         try:
@@ -99,9 +106,9 @@ class StudentProfileSerializer(serializers.ModelSerializer):
         except Exception:
             return 1
 
-    # --------------------------------------------------------
+    # ============================================================
     # COMPLETED PROCESS STEPS
-    # --------------------------------------------------------
+    # ============================================================
 
     def get_completed_process_steps(self, obj):
         try:
@@ -124,9 +131,9 @@ class StudentProfileSerializer(serializers.ModelSerializer):
         except Exception:
             return []
 
-    # --------------------------------------------------------
+    # ============================================================
     # CURRENT PROCESS STAGE
-    # --------------------------------------------------------
+    # ============================================================
 
     def get_current_process_stage(self, obj):
         try:
@@ -146,9 +153,9 @@ class StudentProfileSerializer(serializers.ModelSerializer):
         except Exception:
             return None
 
-    # --------------------------------------------------------
+    # ============================================================
     # PROCESS FINISHED
-    # --------------------------------------------------------
+    # ============================================================
 
     def get_process_finished(self, obj):
         try:
@@ -164,16 +171,10 @@ class StudentProfileSerializer(serializers.ModelSerializer):
 
         except Exception:
             return False
-    def get_application(self, obj):
-        try:
-            return StudentApplicationSerializer(
-                obj.application
-            ).data
-        except StudentApplication.DoesNotExist:
-            return None
-    # --------------------------------------------------------
+
+    # ============================================================
     # META
-    # --------------------------------------------------------
+    # ============================================================
 
     class Meta:
         model = StudentProfile
