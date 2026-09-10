@@ -11,6 +11,16 @@ class StudentApplication(models.Model):
     )
 
     # ============================================================
+    # STEP 1 — STUDENT PHOTO
+    # ============================================================
+
+    step1_photo = models.FileField(
+        storage=SupabaseStudentStorage(),
+        upload_to="applications/step1/",
+        blank=True,
+        null=True,
+    )
+    # ============================================================
     # STEP 4 — INTERVIEW
     # ============================================================
 
