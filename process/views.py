@@ -92,11 +92,6 @@ class StudentProcessViewSet(viewsets.ModelViewSet):
                 process = (
                     StudentProcess.objects
                     .select_for_update()
-                    .select_related(
-                        "student",
-                        "student__user",
-                        "current_stage",
-                    )
                     .get(pk=pk)
                 )
 
@@ -306,11 +301,6 @@ class StudentProcessViewSet(viewsets.ModelViewSet):
                 process = (
                     StudentProcess.objects
                     .select_for_update()
-                    .select_related(
-                        "student",
-                        "student__user",
-                        "current_stage",
-                    )
                     .get(pk=pk)
                 )
 
