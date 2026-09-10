@@ -17,6 +17,7 @@ class StudentApplication(models.Model):
     step1_photo = models.FileField(
         storage=SupabaseStudentStorage(),
         upload_to="applications/step1/",
+        max_length=500,
         blank=True,
         null=True,
     )
@@ -60,6 +61,7 @@ class StudentApplication(models.Model):
     confirmation_file = models.FileField(
         storage=SupabaseStudentStorage(),
         upload_to="applications/step5/",
+        max_length=500,
         blank=True,
         null=True,
     )
@@ -71,6 +73,7 @@ class StudentApplication(models.Model):
     offer_file = models.FileField(
         storage=SupabaseStudentStorage(),
         upload_to="applications/step6/",
+        max_length=500,
         blank=True,
         null=True,
     )
@@ -92,6 +95,7 @@ class StudentApplication(models.Model):
     loc_file = models.FileField(
         storage=SupabaseStudentStorage(),
         upload_to="applications/step7/",
+        max_length=500,
         blank=True,
         null=True,
     )
@@ -139,6 +143,7 @@ class StudentApplication(models.Model):
     visa_approval_letter_file = models.FileField(
         storage=SupabaseStudentStorage(),
         upload_to="applications/step9/",
+        max_length=500,
         blank=True,
         null=True,
     )
@@ -175,6 +180,7 @@ class StudentApplication(models.Model):
     ticket_file = models.FileField(
         storage=SupabaseStudentStorage(),
         upload_to="applications/step10/",
+        max_length=500,
         blank=True,
         null=True,
     )
