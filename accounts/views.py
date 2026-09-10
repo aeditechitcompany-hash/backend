@@ -1,4 +1,5 @@
 import secrets
+import requests
 
 from datetime import timedelta
 
@@ -20,7 +21,6 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from .models import User, OTP, LoginHistory, Role, FeaturePermission, UserRole
 from .permissions import IsAdmin, IsCounselor
 from .serializers import (
     UserSerializer,
@@ -205,6 +205,58 @@ class UserRoleViewSet(viewsets.ModelViewSet):
     filterset_fields = ["user", "role"]
     permission_classes = [IsAdmin]
 
+def send_brevo_email(
+    *,
+    recipient_email,
+    subject,
+    text_content,
+):
+    api_key = settings.BREVO_API_KEY
+    sender_email = settings.BREVO_SENDER_EMAIL
+    sender_name = settings.BREVO_SENDER_NAME
+
+    if not api_key:
+        raise RuntimeError("BREVO_API_KEY is not configured.")
+
+    if not sender_email:
+        raise RuntimeError("BREVO_SENDER_EMAIL is not configured.")
+
+    response = requests.post(
+        "https://api.brevo.com/v3/smtp/email",
+        headers={
+            "accept": "application/json",
+            "api-key": api_key,
+            "content-type": "application/json",
+        },
+        json={
+            "sender": {
+                "name": sender_name,
+                "email": sender_email,
+            },
+            "to": [
+                {
+                    "email": recipient_email,
+                }
+            ],
+            "subject": subject,
+            "textContent": text_content,
+        },
+        timeout=15,
+    )
+
+    if not response.ok:
+        logger.error(
+            "Brevo email failed: status=%s body=%s",
+            response.status_code,
+            response.text,
+        )
+
+        raise RuntimeError(
+            f"Brevo email failed with status {response.status_code}."
+        )
+
+    return response.json()
+
 class PasswordForgotView(APIView):
     permission_classes = [permissions.AllowAny]
 
@@ -248,24 +300,39 @@ class PasswordForgotView(APIView):
             purpose=OTP.Purpose.PASSWORD_RESET,
         )
 
-        send_mail(
-            subject="Nibangsh Consultancy - Password Reset OTP",
-
-            message=(
-                "Nibangsh Consultancy\n\n"
-                "Password Reset OTP\n\n"
-                f"Your verification code is: {otp.code}\n\n"
-                "This code expires in 10 minutes.\n\n"
-                "If you did not request a password reset, "
-                "you can safely ignore this email."
-            ),
-
-            from_email=settings.DEFAULT_FROM_EMAIL,
-
-            recipient_list=[user.email],
-
-            fail_silently=False,
+        email_message = (
+            "Nibangsh Consultancy\n\n"
+            "Password Reset OTP\n\n"
+            f"Your verification code is: {otp.code}\n\n"
+            "This code expires in 10 minutes.\n\n"
+            "If you did not request a password reset, "
+            "you can safely ignore this email."
         )
+
+        try:
+            send_brevo_email(
+                recipient_email=user.email,
+                subject="Nibangsh Consultancy - Password Reset OTP",
+                text_content=email_message,
+            )
+
+        except Exception:
+            logger.exception(
+                "PASSWORD RESET EMAIL ERROR"
+            )
+
+            # Don't leave a usable OTP behind if email failed.
+            otp.is_used = True
+            otp.save(update_fields=["is_used"])
+
+            return Response(
+                {
+                    "detail":
+                        "Unable to send the password reset email. "
+                        "Please try again later."
+                },
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
 
         return Response(
             {
