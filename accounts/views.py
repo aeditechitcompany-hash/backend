@@ -3,7 +3,6 @@ import requests
 
 from datetime import timedelta
 
-from django.core.mail import send_mail
 from django.conf import settings
 from django.utils import timezone
 from .models import (
@@ -205,6 +204,8 @@ class UserRoleViewSet(viewsets.ModelViewSet):
     filterset_fields = ["user", "role"]
     permission_classes = [IsAdmin]
 
+
+
 def send_brevo_email(
     *,
     recipient_email,
@@ -216,10 +217,14 @@ def send_brevo_email(
     sender_name = settings.BREVO_SENDER_NAME
 
     if not api_key:
-        raise RuntimeError("BREVO_API_KEY is not configured.")
+        raise RuntimeError(
+            "BREVO_API_KEY is not configured."
+        )
 
     if not sender_email:
-        raise RuntimeError("BREVO_SENDER_EMAIL is not configured.")
+        raise RuntimeError(
+            "BREVO_SENDER_EMAIL is not configured."
+        )
 
     response = requests.post(
         "https://api.brevo.com/v3/smtp/email",
@@ -252,10 +257,12 @@ def send_brevo_email(
         )
 
         raise RuntimeError(
-            f"Brevo email failed with status {response.status_code}."
+            f"Brevo email failed with status "
+            f"{response.status_code}: {response.text}"
         )
 
     return response.json()
+
 
 class PasswordForgotView(APIView):
     permission_classes = [permissions.AllowAny]
@@ -275,7 +282,6 @@ class PasswordForgotView(APIView):
                 is_active=True,
             )
         except User.DoesNotExist:
-            # Don't reveal whether the email exists.
             return Response(
                 {
                     "detail":
@@ -321,7 +327,7 @@ class PasswordForgotView(APIView):
                 "PASSWORD RESET EMAIL ERROR"
             )
 
-            # Don't leave a usable OTP behind if email failed.
+            # Invalidate OTP if email could not be sent.
             otp.is_used = True
             otp.save(update_fields=["is_used"])
 
@@ -342,7 +348,6 @@ class PasswordForgotView(APIView):
             },
             status=status.HTTP_200_OK,
         )
-
 class PasswordVerifyOTPView(APIView):
     permission_classes = [permissions.AllowAny]
 

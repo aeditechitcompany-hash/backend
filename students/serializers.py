@@ -50,6 +50,45 @@ class StudentApplicationSerializer(serializers.ModelSerializer):
 class StudentProfileSerializer(serializers.ModelSerializer):
 
     # ============================================================
+    # USER INFORMATION
+    # ============================================================
+
+    first_name = serializers.CharField(
+        source="user.first_name",
+        read_only=True,
+    )
+
+    last_name = serializers.CharField(
+        source="user.last_name",
+        read_only=True,
+    )
+
+    email = serializers.EmailField(
+        source="user.email",
+        read_only=True,
+    )
+
+    phone_number = serializers.CharField(
+        source="user.phone_number",
+        read_only=True,
+    )
+
+    role = serializers.CharField(
+        source="user.role",
+        read_only=True,
+    )
+
+    username = serializers.CharField(
+        source="user.username",
+        read_only=True,
+    )
+
+    user_created_at = serializers.DateTimeField(
+        source="user.date_joined",
+        read_only=True,
+    )
+
+    # ============================================================
     # RELATED DATA
     # ============================================================
 
@@ -99,12 +138,12 @@ class StudentProfileSerializer(serializers.ModelSerializer):
             process = obj.process
 
             if process.current_stage is None:
-                return 1
+                return obj.current_step or 1
 
             return process.current_stage.order
 
         except Exception:
-            return 1
+            return obj.current_step or 1
 
     # ============================================================
     # COMPLETED PROCESS STEPS
@@ -171,6 +210,94 @@ class StudentProfileSerializer(serializers.ModelSerializer):
 
         except Exception:
             return False
+
+    # ============================================================
+    # META
+    # ============================================================
+
+    class Meta:
+        model = StudentProfile
+
+        fields = [
+            # ----------------------------------------------------
+            # PROFILE
+            # ----------------------------------------------------
+
+            "id",
+            "user",
+
+            # ----------------------------------------------------
+            # USER
+            # ----------------------------------------------------
+
+            "username",
+            "first_name",
+            "last_name",
+            "email",
+            "phone_number",
+            "role",
+            "user_created_at",
+
+            # ----------------------------------------------------
+            # STUDENT PROFILE
+            # ----------------------------------------------------
+
+            "date_of_birth",
+            "gender",
+            "nationality",
+            "passport_number",
+            "address",
+            "city",
+            "country",
+            "emergency_contact_name",
+            "emergency_contact_phone",
+            "bio",
+            "profile_completion_percentage",
+            "assigned_counselor",
+            "current_step",
+            "mcq_access",
+            "book_access",
+            "created_at",
+            "updated_at",
+
+            # ----------------------------------------------------
+            # RELATED DATA
+            # ----------------------------------------------------
+
+            "education_history",
+            "preferences",
+            "application",
+
+            # ----------------------------------------------------
+            # PROCESS
+            # ----------------------------------------------------
+
+            "process_id",
+            "current_process_step",
+            "completed_process_steps",
+            "current_process_stage",
+            "process_finished",
+        ]
+
+        read_only_fields = [
+            "id",
+            "user",
+            "username",
+            "first_name",
+            "last_name",
+            "email",
+            "phone_number",
+            "role",
+            "user_created_at",
+            "created_at",
+            "updated_at",
+            "profile_completion_percentage",
+            "process_id",
+            "current_process_step",
+            "completed_process_steps",
+            "current_process_stage",
+            "process_finished",
+        ]
 
     # ============================================================
     # META
