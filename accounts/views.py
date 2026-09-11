@@ -174,7 +174,7 @@ class UserViewSet(viewsets.ModelViewSet):
         qs = super().get_queryset()
         user = self.request.user
         if user.is_superuser or user.role in (User.Role.ADMIN, User.Role.COUNSELOR):
-            return qs
+            return qs.filter(user__role="student")
         return qs.filter(id=user.id)  # students only ever see themselves
 
 

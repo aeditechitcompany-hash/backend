@@ -48,80 +48,128 @@ class StudentApplicationSerializer(serializers.ModelSerializer):
 
 
 class StudentProfileSerializer(serializers.ModelSerializer):
-
-    # ============================================================
-    # USER INFORMATION
-    # ============================================================
-
-    first_name = serializers.CharField(
-        source="user.first_name",
-        read_only=True,
-    )
-
-    last_name = serializers.CharField(
-        source="user.last_name",
-        read_only=True,
-    )
-
-    email = serializers.EmailField(
-        source="user.email",
-        read_only=True,
-    )
-
-    phone_number = serializers.CharField(
-        source="user.phone_number",
-        read_only=True,
-    )
-
-    role = serializers.CharField(
-        source="user.role",
-        read_only=True,
-    )
-
     username = serializers.CharField(
         source="user.username",
         read_only=True,
     )
-
+    first_name = serializers.CharField(
+        source="user.first_name",
+        read_only=True,
+    )
+    last_name = serializers.CharField(
+        source="user.last_name",
+        read_only=True,
+    )
+    email = serializers.EmailField(
+        source="user.email",
+        read_only=True,
+    )
+    phone_number = serializers.CharField(
+        source="user.phone_number",
+        read_only=True,
+    )
+    role = serializers.CharField(
+        source="user.role",
+        read_only=True,
+    )
     user_created_at = serializers.DateTimeField(
-        source="user.date_joined",
+        source="user.created_at",
         read_only=True,
     )
 
-    # ============================================================
-    # RELATED DATA
-    # ============================================================
-
-    education_history = EducationSerializer(
-        many=True,
-        read_only=True,
-    )
-
-    preferences = PreferencesSerializer(
-        read_only=True,
-    )
-
-    application = StudentApplicationSerializer(
-        read_only=True,
-    )
-
-    # ============================================================
-    # PROCESS INFORMATION
-    # ============================================================
+    education_history = serializers.SerializerMethodField()
+    application = serializers.SerializerMethodField()
 
     process_id = serializers.SerializerMethodField()
-
     current_process_step = serializers.SerializerMethodField()
-
     completed_process_steps = serializers.SerializerMethodField()
-
     current_process_stage = serializers.SerializerMethodField()
-
     process_finished = serializers.SerializerMethodField()
 
-    # ============================================================
-    # PROCESS ID
-    # ============================================================
+    class Meta:
+        model = StudentProfile
+        fields = [
+            "id",
+
+            # User
+            "username",
+            "first_name",
+            "last_name",
+            "email",
+            "phone_number",
+            "role",
+            "user_created_at",
+
+            # Profile
+            "date_of_birth",
+            "gender",
+            "nationality",
+            "passport_number",
+            "address",
+            "city",
+            "country",
+            "emergency_contact_name",
+            "emergency_contact_phone",
+            "bio",
+            "profile_completion_percentage",
+            "assigned_counselor",
+            "current_step",
+            "mcq_access",
+            "book_access",
+            "created_at",
+            "updated_at",
+
+            # Process
+            "process_id",
+            "current_process_step",
+            "completed_process_steps",
+            "current_process_stage",
+            "process_finished",
+
+            # Related data
+            "education_history",
+            "application",
+        ]
+
+        read_only_fields = [
+            "id",
+            "username",
+            "first_name",
+            "last_name",
+            "email",
+            "phone_number",
+            "role",
+            "user_created_at",
+            "created_at",
+            "updated_at",
+            "process_id",
+            "current_process_step",
+            "completed_process_steps",
+            "current_process_stage",
+            "process_finished",
+            "education_history",
+            "application",
+        ]
+
+    def get_education_history(self, obj):
+        education = obj.education_history.all()
+
+        return EducationSerializer(
+            education,
+            many=True,
+            context=self.context,
+        ).data
+
+    def get_application(self, obj):
+        try:
+            application = obj.application
+        except StudentApplication.DoesNotExist:
+            return None
+
+        return StudentApplicationSerializer(
+            application,
+            context=self.context,
+        ).data
 
     def get_process_id(self, obj):
         try:
@@ -129,25 +177,16 @@ class StudentProfileSerializer(serializers.ModelSerializer):
         except Exception:
             return None
 
-    # ============================================================
-    # CURRENT PROCESS STEP
-    # ============================================================
-
     def get_current_process_step(self, obj):
         try:
             process = obj.process
 
-            if process.current_stage is None:
-                return obj.current_step or 1
+            if process.current_stage:
+                return process.current_stage.order
 
-            return process.current_stage.order
-
+            return obj.current_step or 1
         except Exception:
             return obj.current_step or 1
-
-    # ============================================================
-    # COMPLETED PROCESS STEPS
-    # ============================================================
 
     def get_completed_process_steps(self, obj):
         try:
@@ -156,30 +195,21 @@ class StudentProfileSerializer(serializers.ModelSerializer):
             return list(
                 process.stage_history
                 .filter(
-                    status=ProcessStageHistory.Status.COMPLETED,
+                    status=ProcessStageHistory.Status.COMPLETED
                 )
                 .values_list(
                     "stage__order",
                     flat=True,
                 )
-                .order_by(
-                    "stage__order",
-                )
             )
-
         except Exception:
             return []
 
-    # ============================================================
-    # CURRENT PROCESS STAGE
-    # ============================================================
-
     def get_current_process_stage(self, obj):
         try:
-            process = obj.process
-            stage = process.current_stage
+            stage = obj.process.current_stage
 
-            if stage is None:
+            if not stage:
                 return None
 
             return {
@@ -188,161 +218,24 @@ class StudentProfileSerializer(serializers.ModelSerializer):
                 "order": stage.order,
                 "description": stage.description,
             }
-
         except Exception:
             return None
-
-    # ============================================================
-    # PROCESS FINISHED
-    # ============================================================
 
     def get_process_finished(self, obj):
         try:
             process = obj.process
 
-            if process.current_stage is None:
+            if not process.current_stage:
                 return False
 
-            return process.stage_history.filter(
-                stage=process.current_stage,
-                status=ProcessStageHistory.Status.COMPLETED,
-            ).exists()
+            history = process.stage_history.filter(
+                stage=process.current_stage
+            ).first()
 
+            return (
+                history is not None
+                and history.status
+                == ProcessStageHistory.Status.COMPLETED
+            )
         except Exception:
             return False
-
-    # ============================================================
-    # META
-    # ============================================================
-
-    class Meta:
-        model = StudentProfile
-
-        fields = [
-            # ----------------------------------------------------
-            # PROFILE
-            # ----------------------------------------------------
-
-            "id",
-            "user",
-
-            # ----------------------------------------------------
-            # USER
-            # ----------------------------------------------------
-
-            "username",
-            "first_name",
-            "last_name",
-            "email",
-            "phone_number",
-            "role",
-            "user_created_at",
-
-            # ----------------------------------------------------
-            # STUDENT PROFILE
-            # ----------------------------------------------------
-
-            "date_of_birth",
-            "gender",
-            "nationality",
-            "passport_number",
-            "address",
-            "city",
-            "country",
-            "emergency_contact_name",
-            "emergency_contact_phone",
-            "bio",
-            "profile_completion_percentage",
-            "assigned_counselor",
-            "current_step",
-            "mcq_access",
-            "book_access",
-            "created_at",
-            "updated_at",
-
-            # ----------------------------------------------------
-            # RELATED DATA
-            # ----------------------------------------------------
-
-            "education_history",
-            "preferences",
-            "application",
-
-            # ----------------------------------------------------
-            # PROCESS
-            # ----------------------------------------------------
-
-            "process_id",
-            "current_process_step",
-            "completed_process_steps",
-            "current_process_stage",
-            "process_finished",
-        ]
-
-        read_only_fields = [
-            "id",
-            "user",
-            "username",
-            "first_name",
-            "last_name",
-            "email",
-            "phone_number",
-            "role",
-            "user_created_at",
-            "created_at",
-            "updated_at",
-            "profile_completion_percentage",
-            "process_id",
-            "current_process_step",
-            "completed_process_steps",
-            "current_process_stage",
-            "process_finished",
-        ]
-
-    # ============================================================
-    # META
-    # ============================================================
-
-    class Meta:
-        model = StudentProfile
-
-        fields = [
-            "id",
-            "user",
-            "date_of_birth",
-            "gender",
-            "nationality",
-            "passport_number",
-            "address",
-            "city",
-            "country",
-            "emergency_contact_name",
-            "emergency_contact_phone",
-            "bio",
-            "profile_completion_percentage",
-            "assigned_counselor",
-            "current_step",
-            "mcq_access",
-            "book_access",
-            "created_at",
-            "updated_at",
-
-            # Related data
-            "education_history",
-            "preferences",
-            "application",
-
-            # Process data
-            "process_id",
-            "current_process_step",
-            "completed_process_steps",
-            "current_process_stage",
-            "process_finished",
-        ]
-
-        read_only_fields = [
-            "id",
-            "created_at",
-            "updated_at",
-            "profile_completion_percentage",
-        ]

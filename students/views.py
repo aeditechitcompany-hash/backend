@@ -30,14 +30,24 @@ from .serializers import (
 # ============================================================
 
 class StudentProfileViewSet(viewsets.ModelViewSet):
-    queryset = StudentProfile.objects.select_related(
-        "user",
-        "country",
-        "nationality",
-        "process",
-        "process__current_stage",
-    ).all()
-
+    queryset = (
+        StudentProfile.objects
+        .select_related(
+            "user",
+            "country",
+            "nationality",
+            "assigned_counselor",
+            "process",
+            "process__current_stage",
+        )
+        .prefetch_related(
+            "education_history",
+            "preferences",
+            "application",
+            "process__stage_history",
+        )
+        .all()
+    )
     serializer_class = StudentProfileSerializer
 
     filterset_fields = [
@@ -49,20 +59,28 @@ class StudentProfileViewSet(viewsets.ModelViewSet):
 
     search_fields = [
         "user__email",
+        "user__username",
         "user__first_name",
         "user__last_name",
+        "user__phone_number",
     ]
 
     def get_queryset(self):
         qs = super().get_queryset()
         user = self.request.user
 
-        if user.is_superuser or getattr(user, "role", None) in (
-            "admin",
-            "counselor",
+           # Admins/counselors see students only.
+        if (
+            user.is_superuser
+            or getattr(user, "role", None) in (
+                "admin",
+                "counselor",
+            )
         ):
-            return qs
-
+            return qs.filter(
+                user__role="student"
+            )
+        
         return qs.filter(user=user)
 
     def perform_create(self, serializer):

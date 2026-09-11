@@ -199,3 +199,10 @@ class StudentApplication(models.Model):
 
     def __str__(self):
         return f"Application({self.student.user.email})"
+
+    transcript_file = models.FileField(
+        upload_to="applications/transcript/",
+        blank=True,
+        null=True,
+        max_length=500,
+    )
