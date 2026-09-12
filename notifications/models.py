@@ -6,7 +6,7 @@ class NotificationTemplate(models.Model):
     key = models.CharField(max_length=100, unique=True)
     title_template = models.CharField(max_length=255)
     message_template = models.TextField()
-
+ 
     def __str__(self):
         return self.key
 

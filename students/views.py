@@ -19,6 +19,8 @@ from .serializers import (
     EducationSerializer,
     PreferencesSerializer,
     StudentApplicationSerializer,
+    UbtStudentSerializer,
+    UbtStudentBasicInfoUpdateSerializer,
 )
 
 # ============================================================
@@ -121,6 +123,101 @@ class StudentProfileViewSet(viewsets.ModelViewSet):
             "user_id": str(student.user.id),
             "mcq_access": student.mcq_access,
         })
+
+    @action(
+        detail=False,
+        methods=["get"],
+        url_path="ubt-students",
+        permission_classes=[IsAuthenticated],
+    )
+    def ubt_students(self, request):
+
+        if getattr(request.user, "role", None) != "ubt":
+            return Response(
+                {
+                    "detail": (
+                        "Only UBT users can access "
+                        "this endpoint."
+                    )
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        students = (
+            StudentProfile.objects
+            .select_related("user")
+            .prefetch_related("application")
+            .filter(user__role="student")
+            .order_by("-created_at")
+        )
+
+        serializer = UbtStudentSerializer(
+            students,
+            many=True,
+            context={"request": request},
+        )
+
+        return Response(serializer.data)
+
+    @action(
+        detail=True,
+        methods=["patch"],
+        url_path="basic-info",
+        permission_classes=[IsAuthenticated],
+    )
+    def basic_info(self, request, pk=None):
+
+        if getattr(request.user, "role", None) != "ubt":
+            return Response(
+                {
+                    "detail": (
+                        "Only UBT users can edit "
+                        "student information."
+                    )
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        try:
+            student = (
+                StudentProfile.objects
+                .select_related("user")
+                .get(
+                    pk=pk,
+                    user__role="student",
+                )
+            )
+
+        except StudentProfile.DoesNotExist:
+            return Response(
+                {
+                    "detail": "Student not found."
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        serializer = (
+            UbtStudentBasicInfoUpdateSerializer(
+                student,
+                data=request.data,
+                partial=True,
+            )
+        )
+
+        serializer.is_valid(
+            raise_exception=True
+        )
+
+        serializer.save()
+
+        return Response(
+            UbtStudentSerializer(
+                student,
+                context={"request": request},
+            ).data,
+            status=status.HTTP_200_OK,
+        )
+
 
     @action(
         detail=True,
@@ -234,6 +331,89 @@ class StudentProfileViewSet(viewsets.ModelViewSet):
         return Response(
         StudentProfileSerializer(profile).data
     )
+
+    @action(
+        detail=False,
+        methods=["get"],
+        url_path="ubt-students",
+        permission_classes=[IsAuthenticated],
+    )
+    def ubt_students(self, request):
+        if getattr(request.user, "role", None) != "ubt":
+            return Response(
+                {
+                    "detail": "Only UBT users can access this endpoint."
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        students = (
+            StudentProfile.objects
+            .select_related("user")
+            .prefetch_related("application")
+            .filter(user__role="student")
+            .order_by("-created_at")
+        )
+
+        return Response(
+            UbtStudentSerializer(
+                students,
+                many=True,
+                context={"request": request},
+            ).data
+        )
+    @action(
+        detail=True,
+        methods=["patch"],
+        url_path="basic-info",
+        permission_classes=[IsAuthenticated],
+    )
+    def basic_info(self, request, pk=None):
+        if getattr(request.user, "role", None) != "ubt":
+            return Response(
+                {
+                    "detail": "Only UBT users can edit student information."
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        try:
+            student = (
+                StudentProfile.objects
+                .select_related("user")
+                .get(
+                    pk=pk,
+                    user__role="student",
+                )
+            )
+        except StudentProfile.DoesNotExist:
+            return Response(
+                {
+                    "detail": "Student not found."
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        serializer = UbtStudentBasicInfoUpdateSerializer(
+            student,
+            data=request.data,
+            partial=True,
+        )
+
+        serializer.is_valid(
+            raise_exception=True
+        )
+
+        serializer.save()
+
+        # Return the complete updated UBT student.
+        return Response(
+            UbtStudentSerializer(
+                student,
+                context={"request": request},
+            ).data,
+            status=status.HTTP_200_OK,
+        )
 
     # ============================================================
 # STUDENT APPLICATION
