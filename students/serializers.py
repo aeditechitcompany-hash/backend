@@ -4,37 +4,64 @@ from .models import (
     StudentProfile,
     StudentApplication,
     Education,
-)
-
-from rest_framework import serializers
-
-from .models import (
-    StudentProfile,
-    StudentApplication,
-    Education,
+    Preferences,
 )
 
 
-class EducationSerializer(serializers.ModelSerializer):
-    country_name = serializers.CharField(
-        source="country.name",
+# ============================================================
+# STUDENT PROFILE
+# ============================================================
+
+class StudentProfileSerializer(serializers.ModelSerializer):
+    full_name = serializers.SerializerMethodField()
+
+    email = serializers.EmailField(
+        source="user.email",
         read_only=True,
     )
 
+    phone_number = serializers.CharField(
+        source="user.phone_number",
+        read_only=True,
+        allow_blank=True,
+    )
+
     class Meta:
-        model = Education
+        model = StudentProfile
         fields = [
             "id",
-            "degree_level",
-            "institution_name",
-            "gpa",
-            "gpa_scale",
-            "grade",
-            "passout_year",
+            "full_name",
+            "email",
+            "phone_number",
+            "date_of_birth",
+            "gender",
+            "nationality",
+            "passport_number",
+            "address",
+            "city",
             "country",
-            "country_name",
-            "is_completed",
+            "emergency_contact_name",
+            "emergency_contact_phone",
+            "bio",
+            "profile_completion_percentage",
+            "assigned_counselor",
+            "current_step",
+            "mcq_access",
+            "book_access",
+            "created_at",
+            "updated_at",
         ]
+
+    def get_full_name(self, obj):
+        return (
+            f"{obj.user.first_name} "
+            f"{obj.user.last_name}"
+        ).strip()
+
+
+# ============================================================
+# EDUCATION
+# ============================================================
 
 class EducationSerializer(serializers.ModelSerializer):
     country_name = serializers.CharField(
@@ -60,13 +87,120 @@ class EducationSerializer(serializers.ModelSerializer):
             "is_completed",
         ]
 
-class StudentDocumentSerializer(serializers.Serializer):
+
+# ============================================================
+# PREFERENCES
+# ============================================================
+
+class PreferencesSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Preferences
+        fields = [
+            "id",
+            "student",
+            "preferred_countries",
+            "preferred_universities",
+            "preferred_study_level",
+            "preferred_courses",
+            "preferred_intake",
+            "budget_min",
+            "budget_max",
+            "notes",
+        ]
+
+        read_only_fields = [
+            "id",
+        ]
+
+
+# ============================================================
+# STUDENT APPLICATION
+# ============================================================
+
+class StudentApplicationSerializer(
+    serializers.ModelSerializer
+):
+    class Meta:
+        model = StudentApplication
+
+        fields = [
+            "id",
+            "student",
+
+            # STEP 1
+            "step1_photo",
+            "transcript_file",
+
+            # STEP 4
+            "interview_date",
+            "interview_mode",
+            "interview_result",
+            "interview_notes",
+
+            # STEP 5
+            "application_ref_no",
+            "submission_date",
+            "confirmation_file",
+
+            # STEP 6
+            "offer_file",
+            "offer_type",
+            "offer_expiry_date",
+
+            # STEP 7
+            "loc_file",
+            "loc_verified",
+
+            # STEP 8
+            "course_commencement_date",
+            "scholarship_status",
+            "final_selection_notes",
+            "final_selection_confirmed",
+
+            # STEP 9
+            "visa_ref_no",
+            "visa_status_update",
+            "visa_approval_letter_file",
+
+            # STEP 10
+            "flight_number",
+            "airline",
+            "departure_airport",
+            "arrival_airport",
+            "departure_date_time",
+            "ticket_file",
+
+            "created_at",
+            "updated_at",
+        ]
+
+        read_only_fields = [
+            "id",
+            "student",
+            "created_at",
+            "updated_at",
+        ]
+
+
+# ============================================================
+# UBT DOCUMENT
+# ============================================================
+
+class StudentDocumentSerializer(
+    serializers.Serializer
+):
     name = serializers.CharField()
     field = serializers.CharField()
     url = serializers.CharField()
 
 
-class UbtStudentSerializer(serializers.ModelSerializer):
+# ============================================================
+# UBT STUDENT
+# ============================================================
+
+class UbtStudentSerializer(
+    serializers.ModelSerializer
+):
     full_name = serializers.SerializerMethodField()
 
     phone_number = serializers.CharField(
@@ -76,13 +210,14 @@ class UbtStudentSerializer(serializers.ModelSerializer):
     )
 
     email = serializers.EmailField(
-        source="user.email"
+        source="user.email",
     )
 
     documents = serializers.SerializerMethodField()
 
     class Meta:
         model = StudentProfile
+
         fields = [
             "id",
             "full_name",
@@ -109,13 +244,17 @@ class UbtStudentSerializer(serializers.ModelSerializer):
             ("Confirmation File", "confirmation_file"),
             ("Offer Letter", "offer_file"),
             ("LOC", "loc_file"),
-            ("Visa Approval Letter", "visa_approval_letter_file"),
+            (
+                "Visa Approval Letter",
+                "visa_approval_letter_file",
+            ),
             ("Flight Ticket", "ticket_file"),
         ]
 
         documents = []
 
         for name, field_name in document_fields:
+
             file_field = getattr(
                 application,
                 field_name,
@@ -133,16 +272,18 @@ class UbtStudentSerializer(serializers.ModelSerializer):
             if not url:
                 continue
 
-            documents.append(
-                {
-                    "name": name,
-                    "field": field_name,
-                    "url": url,
-                }
-            )
+            documents.append({
+                "name": name,
+                "field": field_name,
+                "url": url,
+            })
 
         return documents
 
+
+# ============================================================
+# UBT BASIC INFORMATION UPDATE
+# ============================================================
 
 class UbtStudentBasicInfoUpdateSerializer(
     serializers.Serializer
@@ -164,9 +305,11 @@ class UbtStudentBasicInfoUpdateSerializer(
     def validate_email(self, value):
         value = value.strip().lower()
 
+        user_model = self.instance.user.__class__
+
         if (
             self.instance.user.email.lower() != value
-            and self.instance.user.__class__.objects
+            and user_model.objects
             .filter(email__iexact=value)
             .exclude(pk=self.instance.user.pk)
             .exists()
@@ -177,13 +320,23 @@ class UbtStudentBasicInfoUpdateSerializer(
 
         return value
 
-    def update(self, instance, validated_data):
+    def update(
+        self,
+        instance,
+        validated_data,
+    ):
         user = instance.user
 
+        # -------------------------
+        # FULL NAME
+        # -------------------------
+
         if "full_name" in validated_data:
-            full_name = validated_data[
-                "full_name"
-            ].strip()
+
+            full_name = (
+                validated_data["full_name"]
+                .strip()
+            )
 
             parts = full_name.split()
 
@@ -199,6 +352,10 @@ class UbtStudentBasicInfoUpdateSerializer(
                 else ""
             )
 
+        # -------------------------
+        # PHONE
+        # -------------------------
+
         if "phone_number" in validated_data:
             user.phone_number = (
                 validated_data[
@@ -206,11 +363,16 @@ class UbtStudentBasicInfoUpdateSerializer(
                 ].strip()
             )
 
+        # -------------------------
+        # EMAIL
+        # -------------------------
+
         if "email" in validated_data:
             user.email = (
                 validated_data[
                     "email"
-                ].strip().lower()
+                ].strip()
+                .lower()
             )
 
         user.save()
