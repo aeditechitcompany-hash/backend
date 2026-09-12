@@ -201,8 +201,9 @@ class StudentApplication(models.Model):
         return f"Application({self.student.user.email})"
 
     transcript_file = models.FileField(
+        storage=SupabaseStudentStorage(),
         upload_to="applications/transcript/",
+        max_length=500,
         blank=True,
         null=True,
-        max_length=500,
     )
