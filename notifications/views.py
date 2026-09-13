@@ -1,17 +1,27 @@
 from django.contrib.auth import get_user_model
 
 from rest_framework import status, viewsets
-from rest_framework.decorators import action
+from rest_framework.decorators import (
+    action,
+    api_view,
+    permission_classes,
+)
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from .models import Notification, NotificationTemplate
+from .models import (
+    Notification,
+    NotificationTemplate,
+    DeviceToken,
+)
+
 from .serializers import (
     NotificationSerializer,
     NotificationTemplateSerializer,
     PublishNotificationSerializer,
+    DeviceTokenSerializer,
 )
-
+from rest_framework.decorators import api_view
 
 User = get_user_model()
 
@@ -147,3 +157,45 @@ class NotificationViewSet(viewsets.ModelViewSet):
             },
             status=status.HTTP_201_CREATED,
         )
+
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def register_device_token(request):
+    serializer = DeviceTokenSerializer(
+        data=request.data
+    )
+
+    serializer.is_valid(
+        raise_exception=True
+    )
+
+    token = serializer.validated_data["token"]
+    platform = serializer.validated_data.get(
+        "platform",
+        "",
+    )
+
+    device_token, created = (
+        DeviceToken.objects.update_or_create(
+            token=token,
+            defaults={
+                "user": request.user,
+                "platform": platform,
+                "is_active": True,
+            },
+        )
+    )
+
+    return Response(
+        {
+            "message": (
+                "FCM device token registered "
+                "successfully."
+            ),
+            "created": created,
+            "device_token_id": device_token.id,
+        },
+        status=status.HTTP_200_OK,
+    )

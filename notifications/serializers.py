@@ -1,7 +1,10 @@
 from rest_framework import serializers
 
-from .models import Notification, NotificationTemplate
-
+from .models import (
+    Notification,
+    NotificationTemplate,
+    DeviceToken,
+)
 
 class NotificationTemplateSerializer(serializers.ModelSerializer):
     class Meta:
@@ -15,6 +18,33 @@ class NotificationSerializer(serializers.ModelSerializer):
         fields = "__all__"
         read_only_fields = ["created_at", "user"]
 
+class DeviceTokenSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = DeviceToken
+        fields = [
+            "id",
+            "token",
+            "platform",
+            "is_active",
+            "created_at",
+            "updated_at",
+        ]
+
+        read_only_fields = [
+            "id",
+            "created_at",
+            "updated_at",
+        ]
+
+    def validate_token(self, value):
+        value = value.strip()
+
+        if not value:
+            raise serializers.ValidationError(
+                "FCM token cannot be empty."
+            )
+
+        return value
 
 class PublishNotificationSerializer(serializers.Serializer):
     user_ids = serializers.ListField(
