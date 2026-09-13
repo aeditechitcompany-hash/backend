@@ -64,6 +64,7 @@ class StudentProfileSerializer(serializers.ModelSerializer):
 # ============================================================
 
 class EducationSerializer(serializers.ModelSerializer):
+
     country_name = serializers.CharField(
         source="country.name",
         read_only=True,
@@ -71,8 +72,10 @@ class EducationSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Education
+
         fields = [
             "id",
+            "student",
             "degree_level",
             "institution_name",
             "field_of_study",
@@ -85,6 +88,12 @@ class EducationSerializer(serializers.ModelSerializer):
             "gpa_scale",
             "passout_year",
             "is_completed",
+        ]
+
+        read_only_fields = [
+            "id",
+            "student",
+            "country_name",
         ]
 
 

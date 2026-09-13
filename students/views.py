@@ -521,13 +521,21 @@ class StudentApplicationViewSet(viewsets.ModelViewSet):
 
 class EducationViewSet(viewsets.ModelViewSet):
 
-    queryset = Education.objects.select_related(
-        "student",
-        "student__user",
-        "country",
-    ).all()
+    queryset = (
+        Education.objects
+        .select_related(
+            "student",
+            "student__user",
+            "country",
+        )
+        .all()
+    )
 
     serializer_class = EducationSerializer
+
+    permission_classes = [
+        IsAuthenticated,
+    ]
 
     filterset_fields = [
         "student",
@@ -547,7 +555,7 @@ class EducationViewSet(viewsets.ModelViewSet):
         ):
             return qs
 
-        # Students can only access their own education records.
+        # Students can only see their own education records.
         return qs.filter(
             student__user=user
         )
@@ -556,35 +564,62 @@ class EducationViewSet(viewsets.ModelViewSet):
 
         user = self.request.user
 
-        # Student submits their own academic details.
-        if getattr(user, "role", None) == "student":
+        # Only students can submit academic details.
+        if getattr(user, "role", None) != "student":
+            from rest_framework.exceptions import PermissionDenied
 
-            profile, _ = StudentProfile.objects.get_or_create(
-                user=user
+            raise PermissionDenied(
+                "Only students can create education records."
             )
 
-            # Update existing education record instead of
-            # creating duplicate records.
-            education = Education.objects.filter(
-                student=profile
-            ).first()
+        # ----------------------------------------------------
+        # GET OR CREATE STUDENT PROFILE
+        # ----------------------------------------------------
 
-            if education:
-                serializer.instance = education
-                serializer.save(
-                    student=profile
-                )
-            else:
-                serializer.save(
-                    student=profile
-                )
+        profile, created = StudentProfile.objects.get_or_create(
+            user=user
+        )
+
+        print("======================================")
+        print("EDUCATION CREATE")
+        print("USER:", user)
+        print("USER ID:", user.id)
+        print("PROFILE:", profile)
+        print("PROFILE ID:", profile.id)
+        print("PROFILE USER ID:", profile.user_id)
+        print("======================================")
+
+        # ----------------------------------------------------
+        # CHECK EXISTING EDUCATION
+        # ----------------------------------------------------
+
+        education = (
+            Education.objects
+            .filter(student=profile)
+            .first()
+        )
+
+        if education:
+            print(
+                "Updating existing education:",
+                education.id,
+            )
+
+            serializer.instance = education
+
+            serializer.save(
+                student=profile
+            )
 
         else:
-            serializer.save()
+            print(
+                "Creating new education for profile:",
+                profile.id,
+            )
 
-    # ========================================================
-    # ACADEMIC DETAILS STATUS
-    # ========================================================
+            serializer.save(
+                student=profile
+            )
 
     @action(
         detail=False,
@@ -607,11 +642,13 @@ class EducationViewSet(viewsets.ModelViewSet):
                 "education": [],
             })
 
-        education = Education.objects.filter(
-            student=profile
-        ).order_by(
-            "-passout_year",
-            "-end_date",
+        education = (
+            Education.objects
+            .filter(student=profile)
+            .order_by(
+                "-passout_year",
+                "-end_date",
+            )
         )
 
         return Response({
