@@ -2,6 +2,7 @@ from django.conf import settings
 from django.db import models, transaction
 from django.utils import timezone
 
+
 class ProcessStage(models.Model):
     name = models.CharField(max_length=100, unique=True)
     order = models.PositiveIntegerField(default=0)

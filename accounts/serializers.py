@@ -2,9 +2,12 @@ import re
 from django.contrib.auth import authenticate
 from django.utils import timezone
 from rest_framework import serializers
-
+from process.models import (
+    ProcessStage,
+    StudentProcess,
+    ProcessStageHistory,
+)
 from students.models import StudentProfile
-from process.models import ProcessStageHistory
 
 from .models import (
     User,
@@ -235,16 +238,66 @@ class RegisterSerializer(serializers.ModelSerializer):
         password = validated_data.pop("password")
 
         user = User(**validated_data)
-
         user.set_password(password)
-
         user.save()
 
-        # ------------------------------------------------------------
-        # CREATE MINIMAL STUDENT PROFILE FOR UBT
-        # ------------------------------------------------------------
+        # ============================================================
+        # STUDENT
+        # ============================================================
 
-        if user.role == User.Role.UBT:
+        if user.role == User.Role.STUDENT:
+
+            profile, _ = StudentProfile.objects.get_or_create(
+                user=user,
+                defaults={
+                    "mcq_access": False,
+                    "book_access": False,
+                    "current_step": 1,
+                },
+            )
+
+            # --------------------------------------------------------
+            # CREATE APPLICATION PROCESS
+            # --------------------------------------------------------
+
+            first_stage = (
+                ProcessStage.objects
+                .order_by("order", "id")
+                .first()
+            )
+
+            if first_stage is not None:
+
+                student_process, created = (
+                    StudentProcess.objects.get_or_create(
+                        student=profile,
+                        defaults={
+                            "current_stage": first_stage,
+                        },
+                    )
+                )
+
+                # ----------------------------------------------------
+                # INITIAL STAGE HISTORY
+                # ----------------------------------------------------
+
+                ProcessStageHistory.objects.get_or_create(
+                    student_process=student_process,
+                    stage=first_stage,
+                    defaults={
+                        "status": (
+                            ProcessStageHistory
+                            .Status.IN_PROGRESS
+                        ),
+                    },
+                )
+
+        # ============================================================
+        # UBT
+        # ============================================================
+
+        elif user.role == User.Role.UBT:
+
             StudentProfile.objects.get_or_create(
                 user=user,
                 defaults={
@@ -254,7 +307,6 @@ class RegisterSerializer(serializers.ModelSerializer):
             )
 
         return user
-
 
 class LoginSerializer(serializers.Serializer):
     email = serializers.EmailField()
