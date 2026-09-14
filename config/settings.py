@@ -18,6 +18,13 @@ from dotenv import load_dotenv
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 load_dotenv(BASE_DIR / ".env")
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+
+FIREBASE_SERVICE_ACCOUNT_FILE = (
+    BASE_DIR / "firebase-service-account.json"
+)
 
 import dj_database_url
 from datetime import timedelta  # noqa: E402
@@ -317,3 +324,24 @@ BREVO_SENDER_NAME = os.environ.get(
     "BREVO_SENDER_NAME",
     "Nibangsh Consultancy",
 )
+
+import json
+import firebase_admin
+from firebase_admin import credentials
+
+
+FIREBASE_CREDENTIALS_JSON = os.environ.get(
+    "FIREBASE_CREDENTIALS_JSON"
+)
+
+if FIREBASE_CREDENTIALS_JSON:
+    try:
+        firebase_credentials = credentials.Certificate(
+            json.loads(FIREBASE_CREDENTIALS_JSON)
+        )
+
+        if not firebase_admin._apps:
+            firebase_admin.initialize_app(firebase_credentials)
+
+    except Exception as e:
+        print("Firebase initialization failed:", e)

@@ -1,6 +1,6 @@
 from django.db import transaction
 from django.utils import timezone
-
+from django.contrib.auth import get_user_model
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
@@ -19,6 +19,8 @@ from .serializers import (
     StudentProcessSerializer,
     ProcessStageHistorySerializer,
 )
+
+User = get_user_model()
 
 
 class ProcessStageViewSet(viewsets.ModelViewSet):
@@ -163,15 +165,69 @@ class StudentProcessViewSet(viewsets.ModelViewSet):
             next_stage = result["current_stage"]
             finished = result["finished"]
 
-            # -------------------------------------------------
-            # STUDENT USER
-            # -------------------------------------------------
+        # -------------------------------------------------
+        # USERS
+        # -------------------------------------------------
 
-            student_user = process.student.user
+        student_user = process.student.user
 
-            # -------------------------------------------------
-            # NOTIFICATION
-            # -------------------------------------------------
+        if is_student:
+
+            student_name = (
+                student_user.get_full_name().strip()
+                if hasattr(student_user, "get_full_name")
+                else student_user.email
+            )
+
+            admin_users = User.objects.filter(
+                role__in=["admin", "counselor"],
+                is_active=True,
+            )
+
+            superusers = User.objects.filter(
+                is_superuser=True,
+                is_active=True,
+            )
+
+            admin_users = (
+                admin_users | superusers
+            ).distinct()
+
+            if finished:
+
+                title = "Student Completed Application"
+
+                message = (
+                    f"{student_name} has completed the "
+                    "entire application process."
+                )
+
+                notification_type = Notification.Type.SUCCESS
+
+            else:
+
+                title = (
+                    f"Step {previous_stage.order} Completed"
+                )
+
+                message = (
+                    f"{student_name} completed "
+                    f"Step {previous_stage.order}: "
+                    f"{previous_stage.name}."
+                )
+
+                notification_type = Notification.Type.INFO
+
+            for admin_user in admin_users:
+
+                create_notification(
+                    user=admin_user,
+                    title=title,
+                    message=message,
+                    notification_type=notification_type,
+                )
+
+        else:
 
             if finished:
 
@@ -182,9 +238,7 @@ class StudentProcessViewSet(viewsets.ModelViewSet):
                         "Congratulations! Your application "
                         "process has been completed."
                     ),
-                    notification_type=(
-                        Notification.Type.SUCCESS
-                    ),
+                    notification_type=Notification.Type.SUCCESS,
                 )
 
             else:
@@ -192,46 +246,17 @@ class StudentProcessViewSet(viewsets.ModelViewSet):
                 create_notification(
                     user=student_user,
                     title=(
-                        f"Step {previous_stage.order} "
-                        f"Completed"
+                        f"Step {previous_stage.order} Completed"
                     ),
                     message=(
                         f"Step {previous_stage.order}: "
-                        f"{previous_stage.name} has been "
-                        f"completed. Your next step is "
-                        f"Step {next_stage.order}: "
+                        f"{previous_stage.name} has been completed. "
+                        f"Your next step is Step "
+                        f"{next_stage.order}: "
                         f"{next_stage.name}."
                     ),
-                    notification_type=(
-                        Notification.Type.INFO
-                    ),
+                    notification_type=Notification.Type.INFO,
                 )
-
-            # -------------------------------------------------
-            # RESPONSE
-            # -------------------------------------------------
-
-            return Response(
-                {
-                    "detail": (
-                        f"Step {previous_stage.order} "
-                        f"completed successfully."
-                    ),
-                    "previous_stage": {
-                        "id": previous_stage.id,
-                        "name": previous_stage.name,
-                        "order": previous_stage.order,
-                    },
-                    "current_stage": {
-                        "id": next_stage.id,
-                        "name": next_stage.name,
-                        "order": next_stage.order,
-                    },
-                    "finished": finished,
-                },
-                status=status.HTTP_200_OK,
-            )
-
     # =========================================================
     # SET STAGE
     # =========================================================
