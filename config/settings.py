@@ -47,7 +47,9 @@ if not SECRET_KEY:
 DEBUG = os.environ.get("DJANGO_DEBUG", "False").lower() == "true"
 
 ALLOWED_HOSTS = [
-    'backend-1-mltk.onrender.com'
+    "backend-1-mltk.onrender.com",
+    "localhost",
+    "127.0.0.1",
     # host.strip()
     # for host in os.environ.get(
     #     "DJANGO_ALLOWED_HOSTS",
