@@ -43,9 +43,7 @@ class StudentProfileViewSet(viewsets.ModelViewSet):
             "process__current_stage",
         )
         .prefetch_related(
-            "education_history",
-            "preferences",
-            "application",
+           
             "process__stage_history",
         )
         .all()
