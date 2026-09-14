@@ -1,3 +1,4 @@
+
 from django.conf import settings
 from django.db import models, transaction
 from django.utils import timezone
@@ -26,8 +27,11 @@ class StudentProcess(models.Model):
         ProcessStage,
         on_delete=models.SET_NULL,
         null=True,
+        blank=True,
         related_name="students",
     )
+
+    is_completed = models.BooleanField(default=False)
 
     started_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -36,13 +40,26 @@ class StudentProcess(models.Model):
         return f"Process({self.student.user.email})"
 
     @transaction.atomic
-    def complete_current_stage(self, updated_by=None, remarks=""):
+    def complete_current_stage(
+        self,
+        updated_by=None,
+        remarks="",
+    ):
         """
-        Complete the student's current stage and move them
-        to the next process stage.
+        Complete the student's current stage
+        and move the process to the next stage.
         """
 
         if self.current_stage is None:
+
+            if self.is_completed:
+                return {
+                    "previous_stage": None,
+                    "current_stage": None,
+                    "completed": True,
+                    "finished": True,
+                }
+
             raise ValueError(
                 "This student does not have a current process stage."
             )
@@ -54,7 +71,7 @@ class StudentProcess(models.Model):
         )
 
         # ---------------------------------------------------------
-        # FIND CURRENT HISTORY
+        # COMPLETE CURRENT HISTORY
         # ---------------------------------------------------------
 
         history, _ = ProcessStageHistory.objects.get_or_create(
@@ -64,10 +81,6 @@ class StudentProcess(models.Model):
                 "status": ProcessStageHistory.Status.IN_PROGRESS,
             },
         )
-
-        # ---------------------------------------------------------
-        # COMPLETE CURRENT STAGE
-        # ---------------------------------------------------------
 
         history.status = ProcessStageHistory.Status.COMPLETED
         history.completed_at = timezone.now()
@@ -97,13 +110,25 @@ class StudentProcess(models.Model):
         )
 
         # ---------------------------------------------------------
-        # NO NEXT STAGE
+        # FINAL STAGE
         # ---------------------------------------------------------
 
         if next_stage is None:
+
+            self.is_completed = True
+            self.current_stage = None
+
+            self.save(
+                update_fields=[
+                    "is_completed",
+                    "current_stage",
+                    "updated_at",
+                ]
+            )
+
             return {
                 "previous_stage": current_stage,
-                "current_stage": current_stage,
+                "current_stage": None,
                 "completed": True,
                 "finished": True,
             }
@@ -113,10 +138,12 @@ class StudentProcess(models.Model):
         # ---------------------------------------------------------
 
         self.current_stage = next_stage
+        self.is_completed = False
 
         self.save(
             update_fields=[
                 "current_stage",
+                "is_completed",
                 "updated_at",
             ]
         )
@@ -143,6 +170,7 @@ class StudentProcess(models.Model):
 
 
 class ProcessStageHistory(models.Model):
+
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"
         IN_PROGRESS = "in_progress", "In Progress"
@@ -190,3 +218,4 @@ class ProcessStageHistory(models.Model):
             f"{self.student_process_id} - "
             f"{self.stage.name} ({self.status})"
         )
+

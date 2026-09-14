@@ -7,17 +7,30 @@ from .models import (
     Preferences,
 )
 
+from process.models import (
+    ProcessStage,
+    ProcessStageHistory,
+)
+
 
 # ============================================================
 # STUDENT PROFILE
 # ============================================================
 
+
 class StudentProfileSerializer(serializers.ModelSerializer):
+
     full_name = serializers.SerializerMethodField()
+
     process_id = serializers.SerializerMethodField()
+
     current_process_step = serializers.SerializerMethodField()
+
     process_completed = serializers.SerializerMethodField()
+
     completed_process_steps = serializers.SerializerMethodField()
+
+    documents = serializers.SerializerMethodField()
 
     email = serializers.EmailField(
         source="user.email",
@@ -30,94 +43,240 @@ class StudentProfileSerializer(serializers.ModelSerializer):
         allow_blank=True,
     )
 
+    # =========================================================
+    # NAME
+    # =========================================================
+
     def get_full_name(self, obj):
+
         return (
-            f"{obj.user.first_name} {obj.user.last_name}"
+            f"{obj.user.first_name} "
+            f"{obj.user.last_name}"
         ).strip()
 
+    # =========================================================
+    # PROCESS ID
+    # =========================================================
+
     def get_process_id(self, obj):
+
         try:
             return str(obj.process.id)
+
+        except StudentProfile.process.RelatedObjectDoesNotExist:
+            return None
+
         except Exception:
             return None
 
+    # =========================================================
+    # CURRENT PROCESS STEP
+    # =========================================================
+
     def get_current_process_step(self, obj):
+
         try:
-            return obj.process.current_stage.order
+
+            process = obj.process
+
+            if process.is_completed:
+                return None
+
+            if process.current_stage is None:
+                return None
+
+            return process.current_stage.order
+
         except Exception:
             return obj.current_step
 
+    # =========================================================
+    # PROCESS COMPLETED
+    # =========================================================
+
     def get_process_completed(self, obj):
-        # If you haven't added is_completed to StudentProcess yet,
-        # derive it from the stage history/current stage.
+
         try:
-            current_stage = obj.process.current_stage
 
-            if current_stage is None:
-                return True
+            process = obj.process
 
-            has_next_stage = ProcessStage.objects.filter(
-                order__gt=current_stage.order
-            ).exists()
-
-            return not has_next_stage
+            return bool(
+                process.is_completed
+            )
 
         except Exception:
             return False
 
+    # =========================================================
+    # COMPLETED STEPS
+    # =========================================================
+
     def get_completed_process_steps(self, obj):
+
         try:
+
             return list(
-                obj.process.stage_history.filter(
+                obj.process.stage_history
+                .filter(
                     status=ProcessStageHistory.Status.COMPLETED
-                ).values_list(
+                )
+                .order_by("stage__order")
+                .values_list(
                     "stage__order",
                     flat=True,
                 )
             )
+
         except Exception:
             return []
 
+    # =========================================================
+    # DOCUMENTS
+    # =========================================================
+
+    def get_documents(self, obj):
+
+        try:
+            application = obj.application
+
+        except StudentApplication.DoesNotExist:
+            return []
+
+        document_fields = [
+
+            ("Photo", "step1_photo"),
+
+            ("Transcript", "transcript_file"),
+
+            (
+                "Confirmation File",
+                "confirmation_file",
+            ),
+
+            (
+                "Offer Letter",
+                "offer_file",
+            ),
+
+            (
+                "LOC",
+                "loc_file",
+            ),
+
+            (
+                "Visa Approval Letter",
+                "visa_approval_letter_file",
+            ),
+
+            (
+                "Flight Ticket",
+                "ticket_file",
+            ),
+        ]
+
+        documents = []
+
+        for name, field_name in document_fields:
+
+            file_field = getattr(
+                application,
+                field_name,
+                None,
+            )
+
+            if not file_field:
+                continue
+
+            try:
+                url = file_field.url
+
+            except Exception:
+                continue
+
+            if not url:
+                continue
+
+            documents.append(
+                {
+                    "name": name,
+                    "field": field_name,
+                    "url": url,
+                }
+            )
+
+        return documents
+
     class Meta:
+
         model = StudentProfile
 
         fields = [
+
             "id",
+
             "full_name",
+
             "email",
+
             "phone_number",
 
             "date_of_birth",
+
             "gender",
+
             "nationality",
+
             "passport_number",
+
             "address",
+
             "city",
+
             "country",
+
             "emergency_contact_name",
+
             "emergency_contact_phone",
+
             "bio",
 
             "profile_completion_percentage",
+
             "assigned_counselor",
 
-            # StudentProfile step
+            # -----------------------------------------
+            # OLD STEP
+            # -----------------------------------------
+
             "current_step",
 
-            # StudentProcess step
+            # -----------------------------------------
+            # PROCESS
+            # -----------------------------------------
+
             "process_id",
+
             "current_process_step",
+
             "process_completed",
+
             "completed_process_steps",
 
+            # -----------------------------------------
+            # DOCUMENTS
+            # -----------------------------------------
+
+            "documents",
+
             "mcq_access",
+
             "book_access",
 
             "created_at",
+
             "updated_at",
         ]
 
-        
 # ============================================================
 # EDUCATION
 # ============================================================
