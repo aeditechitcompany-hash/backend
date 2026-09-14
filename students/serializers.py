@@ -14,6 +14,42 @@ from .models import (
 
 class StudentProfileSerializer(serializers.ModelSerializer):
     full_name = serializers.SerializerMethodField()
+    process_id = serializers.SerializerMethodField()
+    current_process_step = serializers.SerializerMethodField()
+    process_completed = serializers.SerializerMethodField()
+    completed_process_steps = serializers.SerializerMethodField()
+
+    def get_process_id(self, obj):
+        try:
+            return str(obj.process.id)
+        except Exception:
+            return None
+
+
+    def get_current_process_step(self, obj):
+        try:
+            return obj.process.current_stage.order
+        except Exception:
+            return obj.current_step
+
+
+    def get_process_completed(self, obj):
+        try:
+            return obj.process.current_stage is None
+        except Exception:
+            return False
+
+
+    def get_completed_process_steps(self, obj):
+        try:
+            return list(
+                obj.process.history.values_list(
+                    "stage__order",
+                    flat=True,
+                )
+            )
+        except Exception:
+            return []
 
     email = serializers.EmailField(
         source="user.email",
@@ -29,29 +65,37 @@ class StudentProfileSerializer(serializers.ModelSerializer):
     class Meta:
         model = StudentProfile
         fields = [
-            "id",
-            "full_name",
-            "email",
-            "phone_number",
-            "date_of_birth",
-            "gender",
-            "nationality",
-            "passport_number",
-            "address",
-            "city",
-            "country",
-            "emergency_contact_name",
-            "emergency_contact_phone",
-            "bio",
-            "profile_completion_percentage",
-            "assigned_counselor",
-            "current_step",
-            "mcq_access",
-            "book_access",
-            "created_at",
-            "updated_at",
-        ]
+        "id",
+        "full_name",
+        "email",
+        "phone_number",
 
+        "date_of_birth",
+        "gender",
+        "nationality",
+        "passport_number",
+        "address",
+        "city",
+        "country",
+        "emergency_contact_name",
+        "emergency_contact_phone",
+        "bio",
+        "profile_completion_percentage",
+        "assigned_counselor",
+
+        # Student process
+        "current_step",
+        "process_id",
+        "current_process_step",
+        "process_completed",
+        "completed_process_steps",
+
+        "mcq_access",
+        "book_access",
+
+        "created_at",
+        "updated_at",
+    ]
     def get_full_name(self, obj):
         return (
             f"{obj.user.first_name} "
