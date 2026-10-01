@@ -36,9 +36,7 @@ class SupabaseStudentStorage(Storage):
 
         original_name = os.path.basename(name)
 
-        unique_name = f"{uuid.uuid4()}_{original_name}"
-
-        file_path = f"applications/{unique_name}"
+        file_path = f"applications/{original_name}"
 
         file_data = content.read()
 
@@ -66,7 +64,7 @@ class SupabaseStudentStorage(Storage):
                     file_options={
                         "content-type": content_type,
                         "cache-control": "3600",
-                        "upsert": "false",
+                        "upsert": "true",
                     },
                 )
             )
