@@ -1,0 +1,381 @@
+from pathlib import Path
+
+from django.core.files import File
+from django.db import transaction
+
+from mcq.models import (
+    MCQImport,
+    ImportedQuestion,
+    ImportedOption,
+)
+
+from mcq.services.mcq_importer import parse_import
+
+
+BACKEND_ROOT = Path(__file__).resolve().parents[2]
+
+QUESTION_AUDIO_DIR = (
+    BACKEND_ROOT
+    / "media"
+    / "mcq"
+    / "questions"
+    / "audio"
+)
+
+OPTION_AUDIO_DIR = (
+    BACKEND_ROOT
+    / "media"
+    / "mcq"
+    / "options"
+    / "audio"
+)
+
+
+def _get_audio_path(
+    question_number,
+    option_number=None,
+):
+    """
+    Resolve an audio filename from the existing
+    media/mcq audio directories.
+
+    No filename is invented here.
+    """
+
+    if option_number is None:
+        directory = QUESTION_AUDIO_DIR
+        filename = f"{question_number}.mp3"
+    else:
+        directory = OPTION_AUDIO_DIR
+        filename = f"{question_number}-{option_number}.mp3"
+
+    path = directory / filename
+
+    if path.exists():
+        return path
+
+    return None
+
+
+def _attach_file(
+    model_instance,
+    field_name,
+    file_path,
+):
+    """
+    Attach a local file to a Django FileField.
+
+    The actual storage backend configured on the
+    model field determines where the file is saved.
+    """
+
+    if not file_path:
+        return
+
+    with file_path.open("rb") as file_handle:
+        getattr(model_instance, field_name).save(
+            file_path.name,
+            File(file_handle),
+            save=False,
+        )
+
+
+def _question_has_content(
+    question_text,
+    images,
+    audio,
+):
+    return bool(
+        question_text
+        or images
+        or audio
+    )
+
+
+def _option_has_content(
+    text,
+    image,
+    audio,
+):
+    return bool(
+        text
+        or image
+        or audio
+    )
+
+
+def _create_imported_question(
+    import_job,
+    record,
+):
+    """
+    Create one ImportedQuestion from one parser record.
+    """
+
+    question = ImportedQuestion(
+        import_job=import_job,
+        question_number=record["question_number"],
+        section=record["section"],
+        question_text=record["question_text"],
+        correct_answer="",
+        needs_review=record["needs_review"],
+    )
+
+    images = record.get("images") or []
+
+    # A question-level image is only assigned when the
+    # parser says the image belongs to the question itself.
+    #
+    # Option-image questions are handled separately below.
+    if images and not record.get("option_images"):
+        first_image = images[0]
+
+        image_path = Path(
+            first_image["path"]
+        )
+
+        if image_path.exists():
+            _attach_file(
+                question,
+                "question_image",
+                image_path,
+            )
+
+    audio_info = record.get("audio") or {}
+    question_audio_filename = audio_info.get(
+        "question"
+    )
+
+    if question_audio_filename:
+        audio_path = (
+            QUESTION_AUDIO_DIR
+            / question_audio_filename
+        )
+
+        if audio_path.exists():
+            _attach_file(
+                question,
+                "question_audio",
+                audio_path,
+            )
+
+    question.save()
+
+    return question
+
+
+def _create_imported_options(
+    question,
+    record,
+):
+    """
+    Create ImportedOption records.
+
+    Supports:
+
+    - text options
+    - image options
+    - audio options
+    - any number of options
+    """
+
+    options = record.get("options") or {}
+    option_images = record.get(
+        "option_images"
+    ) or {}
+
+    audio_info = record.get("audio") or {}
+    option_audio = audio_info.get(
+        "options"
+    ) or {}
+
+    created_options = []
+
+    all_option_numbers = set(options.keys())
+    all_option_numbers.update(
+        option_images.keys()
+    )
+
+    for option_number in sorted(
+        all_option_numbers
+    ):
+        text = options.get(
+            option_number,
+            "",
+        )
+
+        image = option_images.get(
+            option_number
+        )
+
+        option = ImportedOption(
+            imported_question=question,
+            order=option_number,
+            text=text,
+            is_correct=False,
+            needs_review=False,
+        )
+
+        has_image = False
+
+        if image:
+            image_path = Path(
+                image["path"]
+            )
+
+            if image_path.exists():
+                _attach_file(
+                    option,
+                    "image",
+                    image_path,
+                )
+                has_image = True
+
+        has_audio = False
+
+        audio_filename = option_audio.get(
+            option_number
+        )
+
+        if audio_filename:
+            audio_path = (
+                OPTION_AUDIO_DIR
+                / audio_filename
+            )
+
+            if audio_path.exists():
+                _attach_file(
+                    option,
+                    "audio",
+                    audio_path,
+                )
+                has_audio = True
+
+        if not _option_has_content(
+            text,
+            has_image,
+            has_audio,
+        ):
+            option.needs_review = True
+
+        option.save()
+
+        created_options.append(option)
+
+    return created_options
+
+
+@transaction.atomic
+def stage_import(
+    import_job,
+    audio_filenames=None,
+):
+    """
+    Parse an MCQ PDF and create staging records.
+
+    This function does NOT create final Question or
+    Option records.
+
+    Existing ImportedQuestion / ImportedOption records
+    belonging to this import are deleted first so that
+    running the staging process again does not create
+    duplicates.
+    """
+
+    if not isinstance(
+        import_job,
+        MCQImport,
+    ):
+        raise TypeError(
+            "import_job must be an MCQImport instance."
+        )
+
+    import_job.status = "processing"
+    import_job.error_message = ""
+    import_job.save(
+        update_fields=[
+            "status",
+            "error_message",
+        ]
+    )
+
+    try:
+        # Remove previous staging data for this job.
+        import_job.questions.all().delete()
+
+        pdf_path = Path(
+            import_job.pdf.path
+        )
+
+        if not pdf_path.exists():
+            raise FileNotFoundError(
+                f"PDF file not found: {pdf_path}"
+            )
+
+        if audio_filenames is None:
+            audio_filenames = []
+
+            if QUESTION_AUDIO_DIR.exists():
+                audio_filenames.extend(
+                    path.name
+                    for path in QUESTION_AUDIO_DIR.iterdir()
+                    if path.is_file()
+                )
+
+            if OPTION_AUDIO_DIR.exists():
+                audio_filenames.extend(
+                    path.name
+                    for path in OPTION_AUDIO_DIR.iterdir()
+                    if path.is_file()
+                )
+
+        records = parse_import(
+            str(pdf_path),
+            listening_start=(
+                import_job.listening_start
+                if import_job.listening_start is not None
+                else 21
+            ),
+            listening_end=(
+                import_job.listening_end
+                if import_job.listening_end is not None
+                else 40
+            ),
+            audio_filenames=audio_filenames,
+        )
+
+        created_questions = []
+
+        for record in records:
+
+            question = _create_imported_question(
+                import_job,
+                record,
+            )
+
+            _create_imported_options(
+                question,
+                record,
+            )
+
+            created_questions.append(
+                question
+            )
+
+        import_job.status = "review"
+        import_job.save(
+            update_fields=["status"]
+        )
+
+        return created_questions
+
+    except Exception as exc:
+        import_job.status = "failed"
+        import_job.error_message = str(exc)
+        import_job.save(
+            update_fields=[
+                "status",
+                "error_message",
+            ]
+        )
+        raise

@@ -2,10 +2,14 @@ from rest_framework import serializers
 
 from .models import (
     QuestionSet,
+    MCQSection,
     Question,
     Option,
     Attempt,
     AttemptAnswer,
+    MCQImport,
+    ImportedQuestion,
+    ImportedOption,
 )
 
 
@@ -317,3 +321,126 @@ class LeaderboardSerializer(
 
     questions_solved = serializers.IntegerField()
     #MAKE
+
+# ============================================================
+# MCQ PDF IMPORT
+# ============================================================
+
+class MCQImportSerializer(serializers.ModelSerializer):
+
+    class Meta:
+        model = MCQImport
+
+        fields = [
+            "id",
+            "name",
+            "question_set",
+            "pdf",
+            "status",
+            "error_message",
+            "created_at",
+        ]
+
+        read_only_fields = [
+            "status",
+            "error_message",
+            "created_at",
+        ]
+
+
+class ImportedOptionSerializer(serializers.ModelSerializer):
+
+    class Meta:
+        model = ImportedOption
+
+        fields = [
+            "id",
+            "imported_question",
+            "order",
+            "text",
+            "image",
+            "audio",
+            "is_correct",
+            "needs_review",
+            "created_at",
+        ]
+
+        read_only_fields = [
+            "created_at",
+        ]
+
+
+class ImportedQuestionSerializer(serializers.ModelSerializer):
+
+    class Meta:
+        model = ImportedQuestion
+
+        fields = [
+            "id",
+            "import_job",
+            "question_number",
+            "section",
+            "question_text",
+            "question_image",
+            "question_audio",
+            "option_a",
+            "option_b",
+            "option_c",
+            "option_d",
+            "correct_answer",
+            "needs_review",
+            "created_at",
+        ]
+
+        read_only_fields = [
+            "created_at",
+        ]
+
+
+# ============================================================
+# STAGED MCQ REVIEW SERIALIZERS
+# ============================================================
+
+class ImportedQuestionReviewSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ImportedQuestion
+        fields = [
+            "id",
+            "import_job",
+            "question_number",
+            "section",
+            "question_text",
+            "question_image",
+            "question_audio",
+            "needs_review",
+            "created_at",
+        ]
+        read_only_fields = [
+            "id",
+            "import_job",
+            "question_number",
+            "needs_review",
+            "created_at",
+        ]
+
+
+class ImportedOptionReviewSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ImportedOption
+        fields = [
+            "id",
+            "imported_question",
+            "order",
+            "text",
+            "image",
+            "audio",
+            "is_correct",
+            "needs_review",
+            "created_at",
+        ]
+        read_only_fields = [
+            "id",
+            "is_correct",
+            "needs_review",
+            "created_at",
+        ]

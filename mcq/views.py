@@ -4,13 +4,16 @@ from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
-
+from rest_framework.parsers import FormParser, MultiPartParser
 from .models import (
     QuestionSet,
     Question,
     Option,
     Attempt,
     AttemptAnswer,
+    MCQImport,
+    ImportedQuestion,
+    ImportedOption,
 )
 
 from .serializers import (
@@ -25,6 +28,11 @@ from .serializers import (
     AttemptAnswerSerializer,
     SubmitAnswerSerializer,
     LeaderboardSerializer,
+    MCQImportSerializer,
+    ImportedQuestionSerializer,
+    ImportedOptionSerializer,
+    ImportedQuestionReviewSerializer,
+    ImportedOptionReviewSerializer,
 )
 
 
@@ -67,6 +75,215 @@ def _has_mcq_access(user):
 
     return bool(student_profile.mcq_access)
 
+# ============================================================================
+# MCQ IMPORT VIEWSET
+# ============================================================================
+
+class MCQImportViewSet(viewsets.ReadOnlyModelViewSet):
+
+    permission_classes = [
+        IsAuthenticated,
+    ]
+
+    serializer_class = MCQImportSerializer
+
+    # ------------------------------------------------------------------------
+    # QUERYSET
+    # ------------------------------------------------------------------------
+
+    def get_queryset(self):
+
+        user = self.request.user
+
+        if not _is_staff_role(user):
+
+            raise PermissionDenied(
+                "Only staff users can access MCQ imports."
+            )
+
+        return (
+            MCQImport.objects
+            .select_related(
+                "question_set",
+            )
+            .prefetch_related(
+                "questions__options",
+            )
+            .all()
+            .order_by(
+                "-created_at",
+            )
+        )
+
+    # ------------------------------------------------------------------------
+    # RETRIEVE IMPORT WITH STAGED QUESTIONS
+    # ------------------------------------------------------------------------
+
+    @action(
+        detail=False,
+        methods=["post"],
+        url_path="upload",
+        parser_classes=[MultiPartParser, FormParser],
+    )
+    def upload(self, request):
+        from pathlib import Path
+        from django.db import transaction
+        from rest_framework.exceptions import ValidationError
+        from mcq.services.import_staging import stage_import
+
+        if not _is_staff_role(request.user):
+            raise PermissionDenied(
+                "Only staff users can upload MCQ PDFs."
+            )
+
+        uploaded_pdf = request.FILES.get("pdf")
+        question_set_id = request.data.get("question_set")
+
+        if uploaded_pdf is None:
+            raise ValidationError({
+                "pdf": "Upload a PDF using the 'pdf' field."
+            })
+
+        if Path(uploaded_pdf.name).suffix.lower() != ".pdf":
+            raise ValidationError({
+                "pdf": "Only PDF files are accepted."
+            })
+
+        if uploaded_pdf.size == 0 or uploaded_pdf.size > 25 * 1024 * 1024:
+            raise ValidationError({
+                "pdf": "The PDF must be greater than 0 bytes and no larger than 25 MB."
+            })
+
+        if uploaded_pdf.read(5) != b"%PDF-":
+            raise ValidationError({
+                "pdf": "The uploaded file does not have a valid PDF signature."
+            })
+        uploaded_pdf.seek(0)
+
+        try:
+            question_set = QuestionSet.objects.get(pk=question_set_id)
+        except (QuestionSet.DoesNotExist, ValueError, TypeError):
+            raise ValidationError({
+                "question_set": "Select an existing question set."
+            })
+
+        try:
+            listening_start = int(request.data.get("listening_start", 21))
+            listening_end = int(request.data.get("listening_end", 40))
+        except (TypeError, ValueError):
+            raise ValidationError({
+                "listening_range": "Listening range must use integers."
+            })
+
+        if listening_start < 1 or listening_end < listening_start:
+            raise ValidationError({
+                "listening_range": "Provide a valid positive listening range."
+            })
+
+        name = request.data.get("name") or Path(uploaded_pdf.name).stem
+        if len(name) > 255:
+            raise ValidationError({
+                "name": "Name must be 255 characters or fewer."
+            })
+
+        with transaction.atomic():
+            import_job = MCQImport.objects.create(
+                name=name,
+                question_set=question_set,
+                pdf=uploaded_pdf,
+                listening_start=listening_start,
+                listening_end=listening_end,
+                status="uploaded",
+            )
+
+        try:
+            stage_import(import_job)
+        except Exception:
+            import_job.refresh_from_db()
+            import_job.status = "failed"
+            if not import_job.error_message:
+                import_job.error_message = (
+                    "PDF processing failed. Check server logs."
+                )
+            import_job.save(update_fields=["status", "error_message"])
+            return Response(
+                {
+                    "id": import_job.pk,
+                    "status": import_job.status,
+                    "error_message": import_job.error_message,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        import_job.refresh_from_db()
+        return Response(
+            {
+                "id": import_job.pk,
+                "name": import_job.name,
+                "question_set": import_job.question_set_id,
+                "status": import_job.status,
+                "questions_created": import_job.questions.count(),
+                "message": (
+                    "Staged for review. Select and verify every correct "
+                    "answer before publishing."
+                ),
+            },
+            status=status.HTTP_201_CREATED,
+        )
+    def retrieve(
+        self,
+        request,
+        *args,
+        **kwargs,
+    ):
+
+        import_job = self.get_object()
+
+        questions = (
+            import_job.questions
+            .prefetch_related(
+                "options",
+            )
+            .order_by(
+                "question_number",
+            )
+        )
+
+        return Response({
+            "id": import_job.id,
+            "name": import_job.name,
+            "question_set": import_job.question_set_id,
+            "pdf": (
+                request.build_absolute_uri(
+                    import_job.pdf.url
+                )
+                if import_job.pdf
+                else None
+            ),
+            "status": import_job.status,
+            "error_message": import_job.error_message,
+            "created_at": import_job.created_at,
+            "listening_start": import_job.listening_start,
+            "listening_end": import_job.listening_end,
+            "questions": [
+                {
+                    **ImportedQuestionSerializer(
+                        question,
+                        context={
+                            "request": request,
+                        },
+                    ).data,
+                    "options": ImportedOptionSerializer(
+                        question.options.all(),
+                        many=True,
+                        context={
+                            "request": request,
+                        },
+                    ).data,
+                }
+                for question in questions
+            ],
+        })
 
 # ============================================================================
 # QUESTION SET VIEWSET
@@ -1045,3 +1262,202 @@ class AttemptViewSet(viewsets.ModelViewSet):
             },
             status=status.HTTP_200_OK,
         )
+
+
+# ============================================================================
+# STAGED MCQ REVIEW VIEWSETS
+# ============================================================================
+
+class ImportedQuestionReviewViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsAuthenticated]
+    serializer_class = ImportedQuestionReviewSerializer
+    http_method_names = [
+    "get", "post", "patch", "head", "options"]
+
+    def get_queryset(self):
+        if not _is_staff_role(self.request.user):
+            raise PermissionDenied(
+                "Only staff users can review imported questions."
+            )
+
+        return (
+            ImportedQuestion.objects
+            .select_related("import_job")
+            .filter(import_job__status="review")
+            .order_by("question_number")
+        )
+
+    @action(detail=True, methods=["post"], url_path="set-correct-option")
+    def set_correct_option(self, request, pk=None):
+        from django.db import transaction
+
+        question = self.get_object()
+        option_id = request.data.get("option_id")
+
+        if option_id in (None, ""):
+            raise ValidationError({
+                "option_id": "Provide the ID of the correct option."
+            })
+
+        try:
+            option_id = int(option_id)
+        except (TypeError, ValueError):
+            raise ValidationError({
+                "option_id": "The option ID must be an integer."
+            })
+
+        with transaction.atomic():
+            option = question.options.filter(pk=option_id).first()
+
+            if option is None:
+                raise ValidationError({
+                    "option_id": "This option does not belong to this question."
+                })
+
+            question.options.update(is_correct=False)
+            option.is_correct = True
+            option.save(update_fields=["is_correct"])
+
+            # Keep the legacy field synchronized for A-D options.
+            if 1 <= option.order <= 4:
+                question.correct_answer = "ABCD"[option.order - 1]
+            else:
+                question.correct_answer = ""
+
+            question.save(update_fields=["correct_answer"])
+
+        return Response({
+            "message": "Correct option selected.",
+            "question_id": question.pk,
+            "correct_option_id": option.pk,
+            "correct_option_order": option.order,
+        })
+
+    @action(detail=True, methods=["post"], url_path="mark-reviewed")
+    def mark_reviewed(self, request, pk=None):
+        question = self.get_object()
+        options = list(question.options.all())
+
+        errors = []
+
+        if not (
+            question.question_text.strip()
+            or question.question_image
+            or question.question_audio
+        ):
+            errors.append(
+                "Add question text, an image, or audio."
+            )
+
+        if len(options) < 2:
+            errors.append(
+                "Add at least two answer options."
+            )
+
+        for option in options:
+            if not (
+                option.text.strip()
+                or option.image
+                or option.audio
+            ):
+                errors.append(
+                    f"Option {option.order} has no text, image, or audio."
+                )
+
+        if sum(option.is_correct for option in options) != 1:
+            errors.append(
+                "Select exactly one correct answer."
+            )
+
+        if errors:
+            raise ValidationError({"review": errors})
+
+        question.needs_review = False
+        question.save(update_fields=["needs_review"])
+
+        question.options.update(needs_review=False)
+
+        return Response({
+            "message": "Question marked as reviewed.",
+            "question_id": question.pk,
+            "needs_review": False,
+        })
+
+
+
+class ImportedOptionReviewViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsAuthenticated]
+    serializer_class = ImportedOptionReviewSerializer
+    http_method_names = [
+        "get", "post", "patch", "delete", "head", "options"
+    ]
+
+    def get_queryset(self):
+        if not _is_staff_role(self.request.user):
+            raise PermissionDenied(
+                "Only staff users can review imported options."
+            )
+
+        queryset = ImportedOption.objects.select_related(
+            "imported_question",
+            "imported_question__import_job",
+        ).filter(
+            imported_question__import_job__status="review"
+        )
+
+        question_id = self.request.query_params.get(
+            "imported_question"
+        )
+
+        if question_id:
+            queryset = queryset.filter(
+                imported_question_id=question_id
+            )
+
+        return queryset.order_by(
+            "imported_question__question_number",
+            "order",
+        )
+
+    def perform_create(self, serializer):
+        question = serializer.validated_data["imported_question"]
+
+        if question.import_job.status != "review":
+            raise ValidationError(
+                "Options can only be added while the import is under review."
+            )
+
+        serializer.save(
+            is_correct=False,
+            needs_review=True,
+        )
+
+    def perform_update(self, serializer):
+        option = self.get_object()
+
+        if option.imported_question.import_job.status != "review":
+            raise ValidationError(
+                "Options can only be edited while the import is under review."
+            )
+
+        new_question = serializer.validated_data.get(
+            "imported_question",
+            option.imported_question,
+        )
+
+        if new_question.pk != option.imported_question_id:
+            raise ValidationError({
+                "imported_question": (
+                    "An option cannot be moved to another question."
+                )
+            })
+
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        if instance.imported_question.import_job.status != "review":
+            raise ValidationError(
+                "Options can only be deleted while the import is under review."
+            )
+
+        instance.delete()

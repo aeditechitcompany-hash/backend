@@ -1,10 +1,17 @@
 import uuid
+
 from django.db import models
 from django.conf import settings
 from django.core.exceptions import ValidationError
+from django.core.files.storage import FileSystemStorage
+
 from .storage import (
     CloudinaryAudioStorage,
     CloudinaryMediaStorage,
+)
+
+STAGING_FILE_STORAGE = FileSystemStorage(
+    location=settings.MEDIA_ROOT,
 )
 class QuestionSet(models.Model):
 
@@ -63,6 +70,13 @@ class QuestionSet(models.Model):
     def question_count(self):
         return self.questions.count()
 
+class MCQSection(models.Model):
+    name = models.CharField(max_length=100)
+    code = models.CharField(max_length=50, unique=True)
+
+    def __str__(self):
+        return self.name
+
 
 class Question(models.Model):
 
@@ -82,6 +96,13 @@ class Question(models.Model):
         max_length=16,
         choices=QuestionType.choices,
         default=QuestionType.TEXT,
+    )
+    section = models.ForeignKey(
+        MCQSection,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="questions"
     )
 
     text = models.TextField(
@@ -322,3 +343,201 @@ class AttemptAnswer(models.Model):
 
     def __str__(self):
         return f"{self.attempt_id} - Q{self.question_id}"
+
+class MCQImport(models.Model):
+    STATUS_CHOICES = [
+        ("uploaded", "Uploaded"),
+        ("processing", "Processing"),
+        ("review", "Review"),
+        ("completed", "Completed"),
+        ("failed", "Failed"),
+    ]
+
+    name = models.CharField(max_length=255)
+
+    question_set = models.ForeignKey(
+        QuestionSet,
+        on_delete=models.CASCADE,
+        related_name="imports"
+    )
+
+    pdf = models.FileField(
+        upload_to="mcq/imports/"
+    )
+
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default="uploaded"
+    )
+
+    error_message = models.TextField(blank=True)
+
+    created_at = models.DateTimeField(
+        auto_now_add=True
+    )
+
+    audio_zip = models.FileField(
+        upload_to="mcq/imports/audio/",
+        blank=True,
+        null=True,
+    )
+
+    listening_start = models.PositiveIntegerField(
+        blank=True,
+        null=True,
+    )
+
+    listening_end = models.PositiveIntegerField(
+        blank=True,
+        null=True,
+    )
+
+    def __str__(self):
+        return self.name
+
+class ImportedQuestion(models.Model):
+    SECTION_TYPES = [
+        ("reading", "Reading"),
+        ("listening", "Listening"),
+    ]
+
+    import_job = models.ForeignKey(
+        MCQImport,
+        on_delete=models.CASCADE,
+        related_name="questions",
+    )
+
+    question_number = models.PositiveIntegerField()
+
+    section = models.CharField(
+        max_length=20,
+        choices=SECTION_TYPES,
+        default="reading",
+    )
+
+    question_text = models.TextField(
+        blank=True,
+    )
+
+    # --------------------------------------------------------
+    # Imported question media
+    # --------------------------------------------------------
+
+    question_image = models.ImageField(
+        upload_to="mcq/imports/questions/images/",
+        blank=True,
+        null=True,
+        storage=STAGING_FILE_STORAGE,
+    )
+
+    question_audio = models.FileField(
+        upload_to="mcq/imports/questions/audio/",
+        blank=True,
+        null=True,
+        storage=STAGING_FILE_STORAGE,
+    )
+    # --------------------------------------------------------
+    # Legacy text option fields
+    #
+    # Kept for compatibility with the existing migration/data.
+    # New imports will use ImportedOption below.
+    # --------------------------------------------------------
+
+    option_a = models.TextField(
+        blank=True,
+    )
+
+    option_b = models.TextField(
+        blank=True,
+    )
+
+    option_c = models.TextField(
+        blank=True,
+    )
+
+    option_d = models.TextField(
+        blank=True,
+    )
+
+    correct_answer = models.CharField(
+        max_length=1,
+        blank=True,
+    )
+
+    needs_review = models.BooleanField(
+        default=False,
+    )
+
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+    )
+
+    def __str__(self):
+        return (
+            f"{self.import_job.name} - "
+            f"Q{self.question_number}"
+        )
+
+
+class ImportedOption(models.Model):
+    """
+    One answer option belonging to an imported question.
+
+    Unlike the old option_a/option_b/option_c/option_d
+    fields, this supports any number of options and allows
+    each option to contain text, an image, audio, or a
+    combination of these.
+    """
+
+    imported_question = models.ForeignKey(
+        ImportedQuestion,
+        on_delete=models.CASCADE,
+        related_name="options",
+    )
+
+    order = models.PositiveIntegerField(
+        default=0,
+    )
+
+    text = models.TextField(
+        blank=True,
+    )
+
+    image = models.ImageField(
+        upload_to="mcq/imports/options/images/",
+        blank=True,
+        null=True,
+        storage=STAGING_FILE_STORAGE,
+    )
+
+    audio = models.FileField(
+        upload_to="mcq/imports/options/audio/",
+        blank=True,
+        null=True,
+        storage=STAGING_FILE_STORAGE,
+    )
+
+    is_correct = models.BooleanField(
+        default=False,
+    )
+
+    needs_review = models.BooleanField(
+        default=False,
+    )
+
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+    )
+
+    class Meta:
+        ordering = [
+            "order",
+            "id",
+        ]
+
+    def __str__(self):
+        return (
+            f"Q{self.imported_question.question_number} "
+            f"- Option {self.order}"
+        )

@@ -1,0 +1,63 @@
+import os
+import sys
+
+os.environ.setdefault(
+    "DJANGO_SETTINGS_MODULE",
+    "config.settings",
+)
+
+import django
+
+django.setup()
+
+from mcq.services.mcq_importer import parse_import
+
+
+# Force UTF-8 output on Windows
+sys.stdout.reconfigure(
+    encoding="utf-8"
+)
+
+
+PDF = r"D:\nibangsh_app\backend\Full set 1 F.pdf"
+
+
+result = parse_import(
+    PDF,
+    listening_start=21,
+    listening_end=40,
+)
+
+
+for item in result:
+
+    print("\n" + "=" * 70)
+
+    print(
+        f"QUESTION {item['question_number']} "
+        f"({item['section']})"
+    )
+
+    print(
+        f"PAGE: {item['page_number']}"
+    )
+
+    print(
+        f"QUESTION TEXT: "
+        f"{item['question_text']}"
+    )
+
+    print(
+        f"OPTIONS: "
+        f"{item['options']}"
+    )
+
+    print(
+        f"AUDIO: "
+        f"{item['audio']}"
+    )
+
+    print(
+        f"NEEDS REVIEW: "
+        f"{item['needs_review']}"
+    )
