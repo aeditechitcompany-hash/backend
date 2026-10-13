@@ -326,6 +326,11 @@ BREVO_SENDER_NAME = os.environ.get(
     "Nibangsh Consultancy",
 )
 
+APPLE_CLIENT_ID = os.environ.get(
+    "APPLE_CLIENT_ID",
+    "com.nibangsh.consultancy",
+)
+
 import json
 import firebase_admin
 from firebase_admin import credentials

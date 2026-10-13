@@ -8,6 +8,7 @@ from .views import (
     StudentLoginView,
     CounselorLoginView,
     AdminLoginView,
+    AppleLoginView,
 
     RequestOTPView,
     VerifyOTPView,
@@ -43,6 +44,7 @@ urlpatterns = [
     path("auth/otp/request/", RequestOTPView.as_view(), name="otp-request"),
     path("auth/otp/verify/", VerifyOTPView.as_view(), name="otp-verify"),
     path("auth/me/", MeView.as_view(), name="me"),
+    path("auth/apple/", AppleLoginView.as_view(), name="apple-login"),
     path("", include(router.urls)),
     path(
         "password/forgot/",

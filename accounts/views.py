@@ -1,6 +1,14 @@
 import secrets
 import requests
+import hashlib
+from rest_framework.exceptions import ValidationError
 
+
+import jwt
+from jwt import PyJWKClient
+from jwt.exceptions import InvalidTokenError
+
+from django.db import transaction
 from datetime import timedelta
 
 from django.conf import settings
@@ -114,6 +122,178 @@ class CounselorLoginView(BaseLoginView):
 class AdminLoginView(BaseLoginView):
     allowed_roles = [User.Role.ADMIN]
 
+
+class AppleLoginView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    APPLE_ISSUER = "https://appleid.apple.com"
+    APPLE_KEYS_URL = "https://appleid.apple.com/auth/keys"
+
+    def post(self, request):
+        identity_token = request.data.get("identity_token")
+
+        if not isinstance(identity_token, str) or not identity_token:
+            return Response(
+                {"detail": "Apple identity token is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        audience = getattr(settings, "APPLE_CLIENT_ID", None)
+
+        if not audience:
+            logger.error("APPLE_CLIENT_ID is not configured")
+            return Response(
+                {"detail": "Apple authentication is not configured."},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        # Verify the token using Apple's public signing keys.
+        try:
+            key_client = PyJWKClient(
+                self.APPLE_KEYS_URL,
+                cache_keys=True,
+                timeout=10,
+            )
+            signing_key = key_client.get_signing_key_from_jwt(
+                identity_token
+            )
+
+            claims = jwt.decode(
+                identity_token,
+                signing_key.key,
+                algorithms=["RS256"],
+                audience=audience,
+                issuer=self.APPLE_ISSUER,
+                options={
+                    "require": ["exp", "iat", "sub", "iss", "aud"]
+                },
+            )
+        except (InvalidTokenError, jwt.PyJWKClientError, ValueError):
+            return Response(
+                {"detail": "Invalid or expired Apple identity token."},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+        except Exception:
+            logger.exception("Apple token verification failed")
+            return Response(
+                {"detail": "Apple authentication is temporarily unavailable."},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        apple_sub = claims.get("sub")
+        email = claims.get("email")
+        email_verified = claims.get("email_verified") in (True, "true")
+
+        if not apple_sub:
+            return Response(
+                {"detail": "Apple account identifier is missing."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            with transaction.atomic():
+                # Find an account already linked to this Apple identity.
+                user = User.objects.filter(apple_sub=apple_sub).first()
+
+                if user is None:
+                    # Only create new accounts with a verified Apple email.
+                    if not email or not email_verified:
+                        return Response(
+                            {
+                                "detail": (
+                                    "A verified Apple email is required "
+                                    "to set up this account."
+                                )
+                            },
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
+
+                    # Do not automatically link an existing account by email.
+                    existing_user = User.objects.filter(
+                        email__iexact=email
+                    ).first()
+
+                    if existing_user is not None:
+                        return Response(
+                            {
+                                "detail": (
+                                    "An account with this email already "
+                                    "exists. Please sign in using your "
+                                    "existing login method."
+                                )
+                            },
+                            status=status.HTTP_409_CONFLICT,
+                        )
+
+                    username = "apple_" + hashlib.sha256(
+                        apple_sub.encode("utf-8")
+                    ).hexdigest()[:24]
+
+                    serializer = RegisterSerializer(
+                        data={
+                            "username": username,
+                            "email": email,
+                            "password": secrets.token_urlsafe(32),
+                            "first_name": request.data.get("first_name", ""),
+                            "last_name": request.data.get("last_name", ""),
+                            "role": User.Role.STUDENT,
+                        }
+                    )
+
+                    if not serializer.is_valid():
+                        return Response(
+                            serializer.errors,
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
+
+                    user = serializer.save()
+                    user.apple_sub = apple_sub
+                    user.is_email_verified = True
+                    user.save(
+                        update_fields=[
+                            "apple_sub",
+                            "is_email_verified",
+                            "updated_at",
+                        ]
+                    )
+
+                if not user.is_active:
+                    return Response(
+                        {"detail": "This account is disabled."},
+                        status=status.HTTP_403_FORBIDDEN,
+                    )
+
+                refresh = RefreshToken.for_user(user)
+                refresh["role"] = user.role
+                refresh["is_staff"] = user.is_staff
+                refresh["email"] = user.email
+
+                access = refresh.access_token
+                access["role"] = user.role
+                access["is_staff"] = user.is_staff
+                access["email"] = user.email
+
+                LoginHistory.objects.create(
+                    user=user,
+                    ip_address=request.META.get("REMOTE_ADDR"),
+                    user_agent=request.META.get("HTTP_USER_AGENT", "")[:255],
+                )
+
+                return Response(
+                    {
+                        "refresh": str(refresh),
+                        "access": str(access),
+                        "user": UserSerializer(user).data,
+                    },
+                    status=status.HTTP_200_OK,
+                )
+
+        except Exception:
+            logger.exception("Apple login could not be completed")
+            return Response(
+                {"detail": "Apple login could not be completed."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
 
 class RequestOTPView(APIView):
     permission_classes = [permissions.AllowAny]

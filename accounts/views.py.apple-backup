@@ -1,0 +1,744 @@
+import secrets
+import requests
+import hashlib
+from rest_framework.exceptions import ValidationError
+
+
+import jwt
+from jwt import PyJWKClient
+from jwt.exceptions import InvalidTokenError
+
+from django.db import transaction
+from datetime import timedelta
+
+from django.conf import settings
+from django.utils import timezone
+from .models import (
+    User,
+    OTP,
+    LoginHistory,
+    PasswordResetToken,
+    Role,
+    FeaturePermission,
+    UserRole,
+)
+
+from rest_framework import viewsets, generics, status, permissions
+from rest_framework.response import Response
+from rest_framework.views import APIView
+from rest_framework_simplejwt.tokens import RefreshToken
+
+from .permissions import IsAdmin, IsCounselor
+from .serializers import (
+    UserSerializer,
+    RegisterSerializer,
+    LoginSerializer,
+    OTPRequestSerializer,
+    OTPVerifySerializer,
+    LoginHistorySerializer,
+    RoleSerializer,
+    FeaturePermissionSerializer,
+    UserRoleSerializer,
+    PasswordForgotSerializer,
+    PasswordVerifyOTPSerializer,
+    PasswordResetSerializer,
+    ChangePasswordSerializer,
+)
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+
+class RegisterView(generics.CreateAPIView):
+    queryset = User.objects.all()
+    serializer_class = RegisterSerializer
+    permission_classes = [permissions.AllowAny]
+
+
+class BaseLoginView(APIView):
+    permission_classes = [permissions.AllowAny]
+    allowed_roles = None
+
+    def post(self, request):
+        try:
+            serializer = LoginSerializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
+            user = serializer.validated_data["user"]
+
+            if self.allowed_roles is not None and not (
+                user.is_superuser or user.role in self.allowed_roles
+            ):
+                return Response(
+                    {"detail": "This account does not have access to this login portal."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+            if not user.is_active:
+                return Response(
+                    {"detail": "This account is disabled."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+            refresh = RefreshToken.for_user(user)
+
+            refresh["role"] = user.role
+            refresh["is_staff"] = user.is_staff
+            refresh["email"] = user.email
+            refresh.access_token["role"] = user.role
+            refresh.access_token["is_staff"] = user.is_staff
+            refresh.access_token["email"] = user.email
+
+            LoginHistory.objects.create(
+                user=user,
+                ip_address=request.META.get("REMOTE_ADDR"),
+                user_agent=request.META.get("HTTP_USER_AGENT", "")[:255],
+            )
+
+            return Response({
+                "refresh": str(refresh),
+                "access": str(refresh.access_token),
+                "user": UserSerializer(user).data,
+            })
+
+        except Exception:
+            logger.exception("LOGIN ERROR")
+            raise
+
+
+class LoginView(BaseLoginView):
+    """Generic login — any role may use it. Kept for a single unified app."""
+    allowed_roles = None
+
+
+class StudentLoginView(BaseLoginView):
+    allowed_roles = [User.Role.STUDENT]
+
+
+class CounselorLoginView(BaseLoginView):
+    allowed_roles = [User.Role.COUNSELOR]
+
+
+class AdminLoginView(BaseLoginView):
+    allowed_roles = [User.Role.ADMIN]
+
+
+class AppleLoginView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    APPLE_ISSUER = "https://appleid.apple.com"
+    APPLE_KEYS_URL = "https://appleid.apple.com/auth/keys"
+
+    def post(self, request):
+        identity_token = request.data.get("identity_token")
+
+        if not identity_token or not isinstance(identity_token, str):
+            return Response(
+                {"detail": "Apple identity token is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # For native iOS Sign in with Apple, the audience is the app's
+        # Bundle ID. Configure this value explicitly for your app.
+        audience = getattr(
+            settings,
+            "APPLE_CLIENT_ID",
+            "com.nibangsh.consultancy",
+        )
+
+        try:
+            apple_key_client = PyJWKClient(
+                self.APPLE_KEYS_URL,
+                cache_keys=True,
+                timeout=10,
+            )
+            signing_key = apple_key_client.get_signing_key_from_jwt(
+                identity_token
+            )
+
+            claims = jwt.decode(
+                identity_token,
+                signing_key.key,
+                algorithms=["RS256"],
+                audience=audience,
+                issuer=self.APPLE_ISSUER,
+                options={"require": ["exp", "iat", "sub", "iss", "aud"]},
+            )
+
+        except (InvalidTokenError, jwt.PyJWKClientError, ValueError):
+            return Response(
+                {"detail": "Invalid or expired Apple identity token."},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+        except Exception:
+            logger.exception("Apple token verification failed")
+            return Response(
+                {"detail": "Apple authentication is temporarily unavailable."},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        apple_sub = claims.get("sub")
+        email = claims.get("email")
+        email_verified = claims.get("email_verified") in (True, "true")
+
+        if not apple_sub:
+            return Response(
+                {"detail": "Apple account identifier is missing."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            with transaction.atomic():
+                # The stable Apple identifier is the primary lookup.
+                user = User.objects.filter(apple_sub=apple_sub).first()
+
+                
+                if user is None:
+                    if not email or not email_verified:
+                        return Response(
+                            {
+                                "detail": (
+                                    "A verified Apple email is required "
+                                    "to set up this account."
+                                )
+                            },
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
+
+                    existing_user = User.objects.filter(
+                        email__iexact=email
+                    ).first()
+
+                    if existing_user is not None:
+                        return Response(
+                            {
+                                "detail": (
+                                    "An account with this email already "
+                                    "exists. Please sign in using your "
+                                    "existing login method."
+                                )
+                            },
+                            status=status.HTTP_409_CONFLICT,
+                        )
+
+                    username = (
+                        "apple_"
+                        + hashlib.sha256(
+                            apple_sub.encode("utf-8")
+                        ).hexdigest()[:24]
+                    )
+
+                    serializer = RegisterSerializer(
+                        data={
+                            "username": username,
+                            "email": email,
+                            "password": secrets.token_urlsafe(32),
+                            "first_name": request.data.get(
+                                "first_name", ""
+                            ),
+                            "last_name": request.data.get(
+                                "last_name", ""
+                            ),
+                            "role": User.Role.STUDENT,
+                        }
+                    )
+                    serializer.is_valid(raise_exception=True)
+                    user = serializer.save()
+
+                    user.apple_sub = apple_sub
+                    user.is_email_verified = True
+                    user.save(
+                        update_fields=[
+                            "apple_sub",
+                            "is_email_verified",
+                            "updated_at",
+                        ]
+                    )
+
+                    # An email can be used to associate an existing account
+                    # only when Apple marks it as verified.
+                    if not email or not email_verified:
+                        return Response(
+                            {
+                                "detail": (
+                                    "A verified Apple email is required "
+                                    "to set up this account."
+                                )
+                            },
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
+
+                    user = User.objects.filter(email__iexact=email).first()
+
+                    if user is not None:
+                        return Response(
+                            {
+                                "detail": (
+                                    "An account with this email already exists. "
+                                    "Please sign in using your existing login method."
+                                )
+                            },
+                            status=status.HTTP_409_CONFLICT,
+                        )
+                        # Associate the verified Apple identity with the
+                        # matching existing account.
+                        if user.apple_sub and user.apple_sub != apple_sub:
+                            return Response(
+                                {
+                                    "detail": (
+                                        "This account is linked to a "
+                                        "different Apple account."
+                                    )
+                                },
+                                status=status.HTTP_409_CONFLICT,
+                            )
+
+                        user.apple_sub = apple_sub
+                        user.is_email_verified = True
+                        user.save(
+                            update_fields=[
+                                "apple_sub",
+                                "is_email_verified",
+                                "updated_at",
+                            ]
+                        )
+
+                    else:
+                        # New Apple registrations are students by default.
+                        # Never accept a role from the client.
+                        username = "apple_" + hashlib.sha256(
+                            apple_sub.encode("utf-8")
+                        ).hexdigest()[:24]
+
+                        serializer = RegisterSerializer(
+                            data={
+                                "username": username,
+                                "email": email,
+                                "password": secrets.token_urlsafe(32),
+                                "first_name": request.data.get(
+                                    "first_name", ""
+                                ),
+                                "last_name": request.data.get(
+                                    "last_name", ""
+                                ),
+                                "role": User.Role.STUDENT,
+                            }
+                        )
+                        serializer.is_valid(raise_exception=True)
+                        user = serializer.save()
+
+                        user.apple_sub = apple_sub
+                        user.is_email_verified = True
+                        user.save(
+                            update_fields=[
+                                "apple_sub",
+                                "is_email_verified",
+                                "updated_at",
+                            ]
+                        )
+
+                if not user.is_active:
+                    return Response(
+                        {"detail": "This account is disabled."},
+                        status=status.HTTP_403_FORBIDDEN,
+                    )
+
+                refresh = RefreshToken.for_user(user)
+                refresh["role"] = user.role
+                refresh["is_staff"] = user.is_staff
+                refresh["email"] = user.email
+
+                access = refresh.access_token
+                access["role"] = user.role
+                access["is_staff"] = user.is_staff
+                access["email"] = user.email
+
+                LoginHistory.objects.create(
+                    user=user,
+                    ip_address=request.META.get("REMOTE_ADDR"),
+                    user_agent=request.META.get(
+                        "HTTP_USER_AGENT", ""
+                    )[:255],
+                )
+
+                return Response(
+                    {
+                        "refresh": str(refresh),
+                        "access": str(access),
+                        "user": UserSerializer(user).data,
+                    },
+                    status=status.HTTP_200_OK,
+                )
+
+        except Exception:
+            logger.exception("APPLE LOGIN ERROR")
+            return Response(
+                {"detail": "Apple login could not be completed."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+
+
+class RequestOTPView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        serializer = OTPRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            user = User.objects.get(email=serializer.validated_data["email"])
+        except User.DoesNotExist:
+            return Response({"detail": "User not found"}, status=status.HTTP_404_NOT_FOUND)
+        otp = OTP.objects.create(user=user, purpose=serializer.validated_data["purpose"])
+        # In production: send OTP via email/SMS instead of returning it
+        return Response({"detail": "OTP generated", "code": otp.code}, status=status.HTTP_201_CREATED)
+
+
+class VerifyOTPView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        serializer = OTPVerifySerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        otp = serializer.validated_data["otp"]
+        user = serializer.validated_data["user"]
+        otp.is_used = True
+        otp.save(update_fields=["is_used"])
+        if otp.purpose == OTP.Purpose.EMAIL_VERIFICATION:
+            user.is_email_verified = True
+            user.save(update_fields=["is_email_verified"])
+        elif otp.purpose == OTP.Purpose.PHONE_VERIFICATION:
+            user.is_phone_verified = True
+            user.save(update_fields=["is_phone_verified"])
+        return Response({"detail": "OTP verified"})
+
+
+class MeView(APIView):
+    def get(self, request):
+        return Response(UserSerializer(request.user).data)
+
+
+class UserViewSet(viewsets.ModelViewSet):
+    """
+    Admins/Counselors: see every user.
+    Students: only ever see/edit their own record (list is filtered to themselves).
+    """
+    queryset = User.objects.all()
+    serializer_class = UserSerializer
+    filterset_fields = ["role", "is_email_verified", "is_active_student", "province", "district", ]
+    search_fields = ["email", "username", "first_name", "last_name","street_address"]
+    pagination_class = None  # frontend expects a plain JSON array, not {count, results}
+
+    def get_permissions(self):
+        if self.action in ("create", "destroy"):
+            return [IsAdmin()]
+        return [permissions.IsAuthenticated()]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        user = self.request.user
+        if user.is_superuser or user.role in (User.Role.ADMIN, User.Role.COUNSELOR):
+            return qs.filter(role=User.Role.STUDENT)
+        return qs.filter(id=user.id)  # students only ever see themselves
+
+
+class LoginHistoryViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = LoginHistory.objects.all()
+    serializer_class = LoginHistorySerializer
+    filterset_fields = ["user", "is_active"]
+    permission_classes = [IsCounselor]
+
+
+class RoleViewSet(viewsets.ModelViewSet):
+    queryset = Role.objects.all()
+    serializer_class = RoleSerializer
+    permission_classes = [IsAdmin]
+
+
+class FeaturePermissionViewSet(viewsets.ModelViewSet):
+    queryset = FeaturePermission.objects.all()
+    serializer_class = FeaturePermissionSerializer
+    filterset_fields = ["role", "module", "action"]
+    permission_classes = [IsAdmin]
+
+
+class UserRoleViewSet(viewsets.ModelViewSet):
+    queryset = UserRole.objects.all()
+    serializer_class = UserRoleSerializer
+    filterset_fields = ["user", "role"]
+    permission_classes = [IsAdmin]
+
+
+
+def send_brevo_email(
+    *,
+    recipient_email,
+    subject,
+    text_content,
+):
+    api_key = settings.BREVO_API_KEY
+    sender_email = settings.BREVO_SENDER_EMAIL
+    sender_name = settings.BREVO_SENDER_NAME
+
+    if not api_key:
+        raise RuntimeError(
+            "BREVO_API_KEY is not configured."
+        )
+
+    if not sender_email:
+        raise RuntimeError(
+            "BREVO_SENDER_EMAIL is not configured."
+        )
+
+    response = requests.post(
+        "https://api.brevo.com/v3/smtp/email",
+        headers={
+            "accept": "application/json",
+            "api-key": api_key,
+            "content-type": "application/json",
+        },
+        json={
+            "sender": {
+                "name": sender_name,
+                "email": sender_email,
+            },
+            "to": [
+                {
+                    "email": recipient_email,
+                }
+            ],
+            "subject": subject,
+            "textContent": text_content,
+        },
+        timeout=15,
+    )
+
+    if not response.ok:
+        logger.error(
+            "Brevo email failed: status=%s body=%s",
+            response.status_code,
+            response.text,
+        )
+
+        raise RuntimeError(
+            f"Brevo email failed with status "
+            f"{response.status_code}: {response.text}"
+        )
+
+    return response.json()
+
+
+class PasswordForgotView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        serializer = PasswordForgotSerializer(
+            data=request.data
+        )
+
+        serializer.is_valid(raise_exception=True)
+
+        email = serializer.validated_data["email"].strip().lower()
+
+        try:
+            user = User.objects.get(
+                email=email,
+                is_active=True,
+            )
+        except User.DoesNotExist:
+            return Response(
+                {
+                    "detail":
+                        "If an account exists for this email, "
+                        "a password reset OTP has been sent."
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        # Invalidate previous password reset OTPs.
+        OTP.objects.filter(
+            user=user,
+            purpose=OTP.Purpose.PASSWORD_RESET,
+            is_used=False,
+        ).update(
+            is_used=True,
+        )
+
+        # Create new OTP.
+        otp = OTP.objects.create(
+            user=user,
+            purpose=OTP.Purpose.PASSWORD_RESET,
+        )
+
+        email_message = (
+            "Nibangsh Consultancy\n\n"
+            "Password Reset OTP\n\n"
+            f"Your verification code is: {otp.code}\n\n"
+            "This code expires in 10 minutes.\n\n"
+            "If you did not request a password reset, "
+            "you can safely ignore this email."
+        )
+
+        try:
+            send_brevo_email(
+                recipient_email=user.email,
+                subject="Nibangsh Consultancy - Password Reset OTP",
+                text_content=email_message,
+            )
+
+        except Exception:
+            logger.exception(
+                "PASSWORD RESET EMAIL ERROR"
+            )
+
+            # Invalidate OTP if email could not be sent.
+            otp.is_used = True
+            otp.save(update_fields=["is_used"])
+
+            return Response(
+                {
+                    "detail":
+                        "Unable to send the password reset email. "
+                        "Please try again later."
+                },
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        return Response(
+            {
+                "detail":
+                    "If an account exists for this email, "
+                    "a password reset OTP has been sent."
+            },
+            status=status.HTTP_200_OK,
+        )
+class PasswordVerifyOTPView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        serializer = PasswordVerifyOTPSerializer(
+            data=request.data
+        )
+
+        serializer.is_valid(raise_exception=True)
+
+        user = serializer.validated_data["user"]
+        otp = serializer.validated_data["otp"]
+
+        # Mark OTP as used.
+        otp.is_used = True
+        otp.save(update_fields=["is_used"])
+
+        # Invalidate previous reset tokens.
+        PasswordResetToken.objects.filter(
+            user=user,
+            is_used=False,
+        ).update(
+            is_used=True,
+        )
+
+        # Create secure reset token.
+        token = secrets.token_urlsafe(48)
+
+        reset_token = PasswordResetToken.objects.create(
+            user=user,
+            token=token,
+            expires_at=timezone.now() + timedelta(minutes=10),
+        )
+
+        return Response(
+            {
+                "detail": "OTP verified successfully.",
+                "reset_token": token,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+class PasswordResetView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        serializer = PasswordResetSerializer(
+            data=request.data
+        )
+
+        serializer.is_valid(raise_exception=True)
+
+        reset_token = serializer.validated_data[
+            "reset_token"
+        ]
+
+        new_password = serializer.validated_data[
+            "new_password"
+        ]
+
+        user = reset_token.user
+
+        user.set_password(new_password)
+        user.save(update_fields=["password"])
+
+        # Token can only be used once.
+        reset_token.is_used = True
+        reset_token.save(
+            update_fields=["is_used"]
+        )
+
+        # Invalidate remaining password reset OTPs.
+        OTP.objects.filter(
+            user=user,
+            purpose=OTP.Purpose.PASSWORD_RESET,
+            is_used=False,
+        ).update(
+            is_used=True,
+        )
+
+        # Invalidate any other reset tokens.
+        PasswordResetToken.objects.filter(
+            user=user,
+            is_used=False,
+        ).exclude(
+            id=reset_token.id
+        ).update(
+            is_used=True,
+        )
+
+        return Response(
+            {
+                "detail":
+                    "Password has been reset successfully."
+            },
+            status=status.HTTP_200_OK,
+        )
+
+class ChangePasswordView(APIView):
+    permission_classes = [
+        permissions.IsAuthenticated
+    ]
+
+    def post(self, request):
+        serializer = ChangePasswordSerializer(
+            data=request.data,
+            context={
+                "request": request,
+            },
+        )
+
+        serializer.is_valid(raise_exception=True)
+
+        user = request.user
+
+        user.set_password(
+            serializer.validated_data["new_password"]
+        )
+
+        user.save(
+            update_fields=["password"]
+        )
+
+        return Response(
+            {
+                "detail":
+                    "Password changed successfully."
+            },
+            status=status.HTTP_200_OK,
+        )

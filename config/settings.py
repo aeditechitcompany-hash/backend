@@ -1,4 +1,4 @@
-
+﻿
 """
 Django settings for config project.
 
@@ -325,6 +325,10 @@ BREVO_SENDER_EMAIL = os.environ.get(
 BREVO_SENDER_NAME = os.environ.get(
     "BREVO_SENDER_NAME",
     "Nibangsh Consultancy",
+)
+APPLE_CLIENT_ID = os.environ.get(
+    "APPLE_CLIENT_ID",
+    "com.nibangsh.nibangshconsultancy",
 )
 
 import json
