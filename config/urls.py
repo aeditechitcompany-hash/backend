@@ -1,6 +1,7 @@
 from django.conf import settings
 from django.conf.urls.static import static
 from django.contrib import admin
+from accounts.public_views import delete_account_page
 from django.urls import path, include
 from drf_spectacular.views import (SpectacularAPIView,SpectacularSwaggerView,SpectacularRedocView,)
 from django.http import JsonResponse
@@ -18,6 +19,7 @@ urlpatterns = [
     ),
     path("api/redoc/",SpectacularRedocView.as_view(url_name="schema"), name="redoc",
     ),
+    path("delete-account/", delete_account_page, name="delete_account_page"),
     path("api/accounts/", include("accounts.urls")),
     path("api/students/", include("students.urls")),
     path("api/", include("countries.urls")),

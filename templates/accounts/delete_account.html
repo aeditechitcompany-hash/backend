@@ -1,0 +1,169 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Account Deletion - Nibangsh Consultancy</title>
+
+    <style>
+        body {
+            margin: 0;
+            font-family: Arial, sans-serif;
+            background: #f4f6fa;
+            color: #263247;
+        }
+
+        header {
+            background: #102c55;
+            color: white;
+            padding: 25px;
+            text-align: center;
+        }
+
+        main {
+            max-width: 750px;
+            margin: 35px auto;
+            padding: 25px;
+        }
+
+        .card {
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 3px 15px #0000000d;
+        }
+
+        h2 { color: #102c55; }
+
+        input, textarea {
+            display: block;
+            width: 100%;
+            padding: 13px;
+            margin: 10px 0 20px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            box-sizing: border-box;
+        }
+
+        button {
+            background: #d62836;
+            color: white;
+            border: 0;
+            padding: 14px 22px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+
+        footer {
+            text-align: center;
+            padding: 25px;
+            color: #666;
+        }
+
+        a { color: #d62836; }
+
+        .message {
+            background: #edf7ed;
+            padding: 12px;
+            margin-bottom: 15px;
+            border-radius: 6px;
+        }
+    </style>
+</head>
+
+<body>
+
+<header>
+    <h1>NIBANGSH CONSULTANCY</h1>
+    <p>Earth Educational Consultancy Pvt. Ltd.</p>
+</header>
+
+<main>
+<div class="card">
+
+    <h2>Account Deletion Request</h2>
+
+    <p>
+        Nibangsh Consultancy respects your privacy.
+        You can request deletion of your account and
+        associated personal information using this page.
+    </p>
+
+    <h2>How to Request Account Deletion</h2>
+
+    <ol>
+        <li>Enter your registered email address.</li>
+        <li>Enter your registered phone number.</li>
+        <li>Submit your deletion request.</li>
+        <li>Our team will verify your identity and process your request.</li>
+    </ol>
+
+    {% if messages %}
+        {% for message in messages %}
+            <div class="message">{{ message }}</div>
+        {% endfor %}
+    {% endif %}
+
+    <h2>Submit Your Request</h2>
+
+    <form method="POST">
+        {% csrf_token %}
+
+        <label>Registered Email Address</label>
+        <input type="email" name="email" required>
+
+        <label>Registered Phone Number</label>
+        <input type="tel" name="phone" required>
+
+        <label>Reason (Optional)</label>
+        <textarea name="reason" rows="4"></textarea>
+
+        <button type="submit">
+            Submit Deletion Request
+        </button>
+    </form>
+
+    <h2>Data Deletion and Retention</h2>
+
+    <p>
+        After verification and approval, we will delete
+        eligible account information and associated
+        personal data. Certain information may be retained
+        where required by applicable laws, regulations,
+        security requirements or legitimate record-keeping
+        obligations.
+    </p>
+
+    <p>
+        We aim to process verified requests within 30 days.
+    </p>
+
+    <h2>Contact Us</h2>
+
+    <p>
+        <strong>Company:</strong>
+        Nibangsh Earth Educational Consultancy Pvt. Ltd.
+    </p>
+
+    <p>
+        <strong>Email:</strong>
+        <a href="mailto:info@nibangshconsultancy.com">
+            info@nibangshconsultancy.com
+        </a>
+    </p>
+
+    <p><strong>Phone:</strong> 01-5929970</p>
+
+    <p><strong>Address:</strong> Bagbazar, Kathmandu, Nepal</p>
+
+</div>
+</main>
+
+<footer>
+    © Nibangsh Earth Educational Consultancy Pvt. Ltd.
+</footer>
+
+</body>
+</html>
