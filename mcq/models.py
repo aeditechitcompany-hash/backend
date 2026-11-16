@@ -10,9 +10,7 @@ from .storage import (
     CloudinaryMediaStorage,
 )
 
-STAGING_FILE_STORAGE = FileSystemStorage(
-    location=settings.MEDIA_ROOT,
-)
+STAGING_FILE_STORAGE = FileSystemStorage()
 class QuestionSet(models.Model):
 
     class Category(models.TextChoices):
