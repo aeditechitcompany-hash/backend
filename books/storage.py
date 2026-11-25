@@ -30,6 +30,14 @@ class SupabaseBookStorage(Storage):
             supabase_key,
         )
 
+    def download(self, name):
+        if not name:
+            raise ValueError("PDF filename is empty.")
+
+        return self.supabase.storage.from_(
+            self.bucket_name
+        ).download(name)
+
     def _save(self, name, content):
         original_name = os.path.basename(
             name.replace("\\", "/")
