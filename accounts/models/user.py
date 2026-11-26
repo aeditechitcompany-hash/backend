@@ -123,6 +123,20 @@ class User(AbstractUser):
     null=True,
     blank=True,
     )
+
+    google_sub = models.CharField(
+        max_length=255,
+        unique=True,
+        null=True,
+        blank=True,
+    )
+
+    facebook_sub = models.CharField(
+        max_length=255,
+        unique=True,
+        null=True,
+        blank=True,
+    )
     phone_number = models.CharField(max_length=20, blank=True, null=True)
     role = models.CharField(max_length=32, choices=Role.choices, default=Role.STUDENT)
     street_address = models.CharField(max_length=32,blank=True, null=True, )

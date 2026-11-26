@@ -330,6 +330,10 @@ APPLE_CLIENT_ID = os.environ.get(
     "APPLE_CLIENT_ID",
     "com.nibangsh.nibangshconsultancy",
 )
+GOOGLE_CLIENT_ID = os.environ.get(
+    "GOOGLE_CLIENT_ID",
+    ""
+)
 
 import json
 import firebase_admin

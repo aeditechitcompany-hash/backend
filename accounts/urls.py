@@ -9,6 +9,7 @@ from .views import (
     CounselorLoginView,
     AdminLoginView,
     AppleLoginView,
+    GoogleLoginView,
 
     RequestOTPView,
     VerifyOTPView,
@@ -45,6 +46,7 @@ urlpatterns = [
     path("auth/otp/verify/", VerifyOTPView.as_view(), name="otp-verify"),
     path("auth/me/", MeView.as_view(), name="me"),
     path("auth/apple/", AppleLoginView.as_view(), name="apple-login"),
+    path("auth/google/", GoogleLoginView.as_view(), name="google-login"),
     path("", include(router.urls)),
     path(
         "password/forgot/",

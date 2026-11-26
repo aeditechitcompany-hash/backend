@@ -295,6 +295,192 @@ class AppleLoginView(APIView):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
+class GoogleLoginView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    GOOGLE_ISSUER = "https://accounts.google.com"
+    GOOGLE_KEYS_URL = "https://www.googleapis.com/oauth2/v3/certs"
+
+    def post(self, request):
+        identity_token = request.data.get("identity_token")
+
+        if not isinstance(identity_token, str) or not identity_token:
+            return Response(
+                {"detail": "Google identity token is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        audience = getattr(settings, "GOOGLE_CLIENT_ID", None)
+
+        if not audience:
+            logger.error("GOOGLE_CLIENT_ID is not configured")
+            return Response(
+                {"detail": "Google authentication is not configured."},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        # Verify Google's signed identity token.
+        try:
+            key_client = PyJWKClient(
+                self.GOOGLE_KEYS_URL,
+                cache_keys=True,
+                timeout=10,
+            )
+
+            signing_key = key_client.get_signing_key_from_jwt(
+                identity_token
+            )
+
+            claims = jwt.decode(
+                identity_token,
+                signing_key.key,
+                algorithms=["RS256"],
+                audience=audience,
+                issuer=self.GOOGLE_ISSUER,
+                options={
+                    "require": [
+                        "exp",
+                        "iat",
+                        "sub",
+                        "iss",
+                        "aud",
+                        "email",
+                    ]
+                },
+            )
+
+        except (InvalidTokenError, jwt.PyJWKClientError, ValueError):
+            return Response(
+                {"detail": "Invalid or expired Google identity token."},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
+        except Exception:
+            logger.exception("Google token verification failed")
+            return Response(
+                {
+                    "detail":
+                        "Google authentication is temporarily unavailable."
+                },
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        google_sub = claims.get("sub")
+        email = (claims.get("email") or "").strip().lower()
+        email_verified = claims.get("email_verified") is True
+
+        if not google_sub or not email or not email_verified:
+            return Response(
+                {
+                    "detail":
+                        "A valid Google account with a verified email "
+                        "is required."
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            with transaction.atomic():
+
+                # Find an existing account linked to this Google identity.
+                user = User.objects.filter(
+                    google_sub=google_sub
+                ).first()
+
+                if user is None:
+
+                    # Never automatically link an existing account by email.
+                    existing_user = User.objects.filter(
+                        email__iexact=email
+                    ).first()
+
+                    if existing_user is not None:
+                        return Response(
+                            {
+                                "detail": (
+                                    "An account with this email already "
+                                    "exists. Please sign in using your "
+                                    "existing login method."
+                                )
+                            },
+                            status=status.HTTP_409_CONFLICT,
+                        )
+
+                    username = "google_" + hashlib.sha256(
+                        google_sub.encode("utf-8")
+                    ).hexdigest()[:24]
+
+                    serializer = RegisterSerializer(
+                        data={
+                            "username": username,
+                            "email": email,
+                            "password": secrets.token_urlsafe(32),
+                            "first_name": claims.get("given_name", ""),
+                            "last_name": claims.get("family_name", ""),
+                            "role": User.Role.STUDENT,
+                        }
+                    )
+
+                    if not serializer.is_valid():
+                        return Response(
+                            serializer.errors,
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
+
+                    user = serializer.save()
+                    user.google_sub = google_sub
+                    user.is_email_verified = True
+
+                    user.save(
+                        update_fields=[
+                            "google_sub",
+                            "is_email_verified",
+                            "updated_at",
+                        ]
+                    )
+
+                if not user.is_active:
+                    return Response(
+                        {"detail": "This account is disabled."},
+                        status=status.HTTP_403_FORBIDDEN,
+                    )
+
+                # Generate Django JWT tokens.
+                refresh = RefreshToken.for_user(user)
+
+                refresh["role"] = user.role
+                refresh["is_staff"] = user.is_staff
+                refresh["email"] = user.email
+
+                access = refresh.access_token
+                access["role"] = user.role
+                access["is_staff"] = user.is_staff
+                access["email"] = user.email
+
+                LoginHistory.objects.create(
+                    user=user,
+                    ip_address=request.META.get("REMOTE_ADDR"),
+                    user_agent=request.META.get(
+                        "HTTP_USER_AGENT", ""
+                    )[:255],
+                )
+
+                return Response(
+                    {
+                        "refresh": str(refresh),
+                        "access": str(access),
+                        "user": UserSerializer(user).data,
+                    },
+                    status=status.HTTP_200_OK,
+                )
+
+        except Exception:
+            logger.exception("Google login could not be completed")
+            return Response(
+                {"detail": "Google login could not be completed."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
 class RequestOTPView(APIView):
     permission_classes = [permissions.AllowAny]
 
