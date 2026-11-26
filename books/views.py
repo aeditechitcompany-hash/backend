@@ -75,9 +75,57 @@ class BookViewSet(viewsets.ModelViewSet):
     @action(
         detail=True,
         methods=["get"],
-        url_path="open",
+        url_path="check-access",
         permission_classes=[IsAuthenticated],
     )
+    def check_access(self, request, pk=None):
+        book = self.get_object()
+        user = request.user
+
+        is_staff_user = (
+            user.is_superuser
+            or getattr(user, "role", None) in ("admin", "counselor")
+        )
+
+        if is_staff_user:
+            return Response({
+                "has_access": True,
+                "access_status": "approved",
+                "book_available": bool(book.pdf),
+            })
+
+        if getattr(user, "role", None) != "student":
+            raise PermissionDenied(
+                "You are not authorized to access this book."
+            )
+
+        try:
+            profile = user.student_profile
+        except StudentProfile.DoesNotExist:
+            raise PermissionDenied("Student profile not found.")
+
+        access = StudentBookAccess.objects.filter(
+            student=profile,
+            book=book,
+        ).first()
+
+        has_access = bool(access and access.is_valid)
+
+        return Response({
+            "has_access": has_access,
+            "access_status": (
+                access.status if access else "not_purchased"
+            ),
+            "book_available": bool(book.pdf),
+        })
+
+    @action(
+        detail=True,
+        methods=["get"],
+        url_path="open",
+        permission_classes=[IsAuthenticated],
+    )   
+    
     def open_book(self, request, pk=None):
         book = self.get_object()
         user = request.user
